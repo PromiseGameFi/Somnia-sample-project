@@ -1,0 +1,35 @@
+{
+  "name": "web2-api-demo",
+  "version": "1.0.0",
+  "description": "Demo project for Web2 API integration with logging and health checks",
+  "main": "dist/app.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "dev": "nodemon --exec ts-node src/app.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["web2", "api", "logging", "health-checks", "express"],
+  "author": "Developer",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "winston": "^3.11.0",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1",
+    "nodemon": "^3.0.1",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
