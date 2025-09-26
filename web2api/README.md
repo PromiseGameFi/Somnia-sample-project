@@ -126,6 +126,3 @@ Logs are written to the `logs/` directory:
 - Implement rate limiting
 - Add authentication for sensitive endpoints
 
-## License
-
-MIT
