@@ -441,7 +441,3 @@ This repository is regularly updated with:
 - Enhanced documentation
 
 Star the repository to stay updated with the latest security examples and best practices!
-
----
-
-**Remember**: Security is an ongoing process, not a one-time check. Always stay informed about the latest threats and best practices in smart contract security.
