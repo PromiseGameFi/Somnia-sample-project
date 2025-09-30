@@ -21,6 +21,12 @@ async function main() {
   // Demonstrate Access Control Vulnerability
   await demonstrateAccessControl(deployer, attacker, user, demoAmount);
   
+  // Demonstrate Integer Overflow Vulnerability
+  await demonstrateIntegerOverflow(deployer, attacker, user, demoAmount);
+  
+  // Demonstrate Upgradeable Contract Vulnerability
+  await demonstrateUpgradeableVulnerability(deployer, attacker, user);
+  
   // Show security tips
   showQuickTips();
   
@@ -31,26 +37,26 @@ async function main() {
 async function demonstrateReentrancy(deployer, attacker, user, amount) {
   console.log("🔴 === REENTRANCY VULNERABILITY DEMO ===");
   
-  // Deploy vulnerable bank
-  const VulnerableBank = await ethers.getContractFactory("VulnerableBank");
-  const vulnerableBank = await VulnerableBank.deploy();
-  await vulnerableBank.deployed();
-  console.log("VulnerableBank deployed to:", vulnerableBank.address);
+  // Deploy vulnerable reentrancy contract
+  const ReentrancyVulnerable = await ethers.getContractFactory("ReentrancyVulnerable");
+  const reentrancyVulnerable = await ReentrancyVulnerable.deploy();
+  await reentrancyVulnerable.deployed();
+  console.log("ReentrancyVulnerable deployed to:", reentrancyVulnerable.address);
   
   // User deposits funds
-  await vulnerableBank.connect(user).deposit({ value: amount });
+  await reentrancyVulnerable.connect(user).deposit({ value: amount });
   console.log("User deposited:", ethers.utils.formatEther(amount), "ETH");
-  console.log("User balance in bank:", ethers.utils.formatEther(await vulnerableBank.getBalance(user.address)), "ETH");
+  console.log("User balance:", ethers.utils.formatEther(await reentrancyVulnerable.getBalance(user.address)), "ETH");
   
   console.log("\n⚠️  Vulnerability: External call before state update allows reentrancy");
   console.log("💡 Mitigation: Use ReentrancyGuard and Checks-Effects-Interactions pattern");
   
-  // Deploy secure bank
+  // Deploy secure reentrancy contract
   console.log("\n🟢 Secure Implementation:");
-  const SecureBank = await ethers.getContractFactory("SecureBank");
-  const secureBank = await SecureBank.deploy();
-  await secureBank.deployed();
-  console.log("SecureBank deployed to:", secureBank.address);
+  const ReentrancySecure = await ethers.getContractFactory("ReentrancySecure");
+  const reentrancySecure = await ReentrancySecure.deploy();
+  await reentrancySecure.deployed();
+  console.log("ReentrancySecure deployed to:", reentrancySecure.address);
   console.log("✅ Uses ReentrancyGuard and proper state management");
   
   console.log("");
@@ -59,27 +65,72 @@ async function demonstrateReentrancy(deployer, attacker, user, amount) {
 async function demonstrateAccessControl(deployer, attacker, user, amount) {
   console.log("🔴 === ACCESS CONTROL VULNERABILITY DEMO ===");
   
-  // Deploy vulnerable wallet
-  const VulnerableWallet = await ethers.getContractFactory("VulnerableWallet");
-  const vulnerableWallet = await VulnerableWallet.deploy();
-  await vulnerableWallet.deployed();
-  console.log("VulnerableWallet deployed to:", vulnerableWallet.address);
+  // Deploy vulnerable access control contract
+  const AccessControlVulnerable = await ethers.getContractFactory("AccessControlVulnerable");
+  const accessControlVulnerable = await AccessControlVulnerable.deploy();
+  await accessControlVulnerable.deployed();
+  console.log("AccessControlVulnerable deployed to:", accessControlVulnerable.address);
   
-  // Owner deposits funds
-  await vulnerableWallet.connect(deployer).deposit({ value: amount });
-  console.log("Owner deposited:", ethers.utils.formatEther(amount), "ETH");
-  console.log("Wallet balance:", ethers.utils.formatEther(await vulnerableWallet.getBalance()), "ETH");
+  // Initialize the contract
+  await accessControlVulnerable.connect(deployer).initialize();
+  console.log("Contract initialized by deployer");
   
-  console.log("\n⚠️  Vulnerability: Missing access control allows anyone to withdraw");
-  console.log("💡 Mitigation: Use proper access control modifiers (onlyOwner)");
+  console.log("\n⚠️  Vulnerability: Missing access control and weak authentication");
+  console.log("💡 Mitigation: Use proper access control with OpenZeppelin AccessControl");
   
-  // Deploy secure wallet
+  // Deploy secure access control contract
   console.log("\n🟢 Secure Implementation:");
-  const SecureWallet = await ethers.getContractFactory("SecureWallet");
-  const secureWallet = await SecureWallet.deploy();
-  await secureWallet.deployed();
-  console.log("SecureWallet deployed to:", secureWallet.address);
-  console.log("✅ Uses OpenZeppelin Ownable for proper access control");
+  const AccessControlSecure = await ethers.getContractFactory("AccessControlSecure");
+  const accessControlSecure = await AccessControlSecure.deploy();
+  await accessControlSecure.deployed();
+  console.log("AccessControlSecure deployed to:", accessControlSecure.address);
+  console.log("✅ Uses OpenZeppelin AccessControl for proper role management");
+  
+  console.log("");
+}
+
+async function demonstrateIntegerOverflow(deployer, attacker, user, amount) {
+  console.log("🔴 === INTEGER OVERFLOW VULNERABILITY DEMO ===");
+  
+  // Deploy vulnerable integer overflow contract
+  const IntegerOverflowVulnerable = await ethers.getContractFactory("IntegerOverflowVulnerable");
+  const integerOverflowVulnerable = await IntegerOverflowVulnerable.deploy();
+  await integerOverflowVulnerable.deployed();
+  console.log("IntegerOverflowVulnerable deployed to:", integerOverflowVulnerable.address);
+  
+  console.log("\n⚠️  Vulnerability: No overflow/underflow protection in Solidity < 0.8.0");
+  console.log("💡 Mitigation: Use SafeMath library or Solidity >= 0.8.0 with built-in checks");
+  
+  // Deploy secure integer overflow contract
+  console.log("\n🟢 Secure Implementation:");
+  const IntegerOverflowSecure = await ethers.getContractFactory("IntegerOverflowSecure");
+  const integerOverflowSecure = await IntegerOverflowSecure.deploy();
+  await integerOverflowSecure.deployed();
+  console.log("IntegerOverflowSecure deployed to:", integerOverflowSecure.address);
+  console.log("✅ Uses SafeMath and proper overflow protection");
+  
+  console.log("");
+}
+
+async function demonstrateUpgradeableVulnerability(deployer, attacker, user) {
+  console.log("🔴 === UPGRADEABLE CONTRACT VULNERABILITY DEMO ===");
+  
+  // Deploy vulnerable proxy
+  const VulnerableProxy = await ethers.getContractFactory("VulnerableProxy");
+  const vulnerableProxy = await VulnerableProxy.deploy(ethers.constants.AddressZero);
+  await vulnerableProxy.deployed();
+  console.log("VulnerableProxy deployed to:", vulnerableProxy.address);
+  
+  console.log("\n⚠️  Vulnerability: Unprotected upgrade mechanism and storage collisions");
+  console.log("💡 Mitigation: Use OpenZeppelin upgradeable contracts with proper access control");
+  
+  // Deploy secure upgradeable factory
+  console.log("\n🟢 Secure Implementation:");
+  const SecureUpgradeableFactory = await ethers.getContractFactory("SecureUpgradeableFactory");
+  const secureUpgradeableFactory = await SecureUpgradeableFactory.deploy();
+  await secureUpgradeableFactory.deployed();
+  console.log("SecureUpgradeableFactory deployed to:", secureUpgradeableFactory.address);
+  console.log("✅ Uses proper access control and upgrade safety mechanisms");
   
   console.log("");
 }

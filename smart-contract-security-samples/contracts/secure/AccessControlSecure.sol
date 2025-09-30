@@ -2,658 +2,310 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
  * @title AccessControlSecure
- * @dev Demonstrates secure access control patterns and best practices
+ * @dev Demonstrates secure access control implementation
  * 
- * Security measures implemented:
- * 1. Role-based access control (RBAC) using OpenZeppelin
- * 2. Two-step ownership transfer
- * 3. Time-locked critical operations
- * 4. Multi-signature requirements for sensitive functions
- * 5. Proper initialization with access controls
- * 6. Emergency pause functionality
- * 7. Signature-based authorization
- * 8. Rate limiting and cooldown periods
- * 9. Comprehensive event logging
- * 10. Input validation and sanitization
+ * SECURITY FEATURES:
+ * 1. Role-based access control using OpenZeppelin AccessControl
+ * 2. Proper authentication using msg.sender
+ * 3. Multi-level permission system
+ * 4. Secure ownership transfer with 2-step process
+ * 5. Pausable functionality for emergency stops
+ * 6. Reentrancy protection
+ * 7. Input validation and error handling
  */
-contract AccessControlSecure is AccessControl, Ownable2Step, ReentrancyGuard, Pausable, EIP712 {
-    using ECDSA for bytes32;
-    
+contract AccessControlSecure is AccessControl, Pausable, ReentrancyGuard, Ownable2Step {
     // Role definitions
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
-    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
     
-    // State variables
-    mapping(address => uint256) public balances;
-    mapping(address => uint256) public lastWithdrawal;
-    mapping(address => uint256) public dailyWithdrawn;
-    mapping(address => uint256) public lastDailyReset;
-    mapping(bytes32 => bool) public usedNonces;
+    mapping(address => uint256) private _balances;
+    mapping(address => bool) private _authorized;
     
-    uint256 public totalSupply;
-    uint256 public constant MAX_SUPPLY = 1_000_000 ether;
-    uint256 public constant DAILY_WITHDRAWAL_LIMIT = 10_000 ether;
-    uint256 public constant WITHDRAWAL_COOLDOWN = 1 hours;
-    uint256 public constant EMERGENCY_DELAY = 24 hours;
-    uint256 public constant MAX_BATCH_SIZE = 100;
+    uint256 private _totalSupply;
+    uint256 private _maxSupply = 1000000 * 10**18;
+    bool private _initialized;
     
-    // Time-locked operations
-    struct TimeLock {
-        uint256 executeTime;
-        bool executed;
-        bytes32 operation;
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Mint(address indexed to, uint256 amount);
+    event Burn(address indexed from, uint256 amount);
+    event MaxSupplyChanged(uint256 oldMaxSupply, uint256 newMaxSupply);
+    event AuthorizationGranted(address indexed user, address indexed grantor);
+    event AuthorizationRevoked(address indexed user, address indexed revoker);
+    
+    modifier onlyInitialized() {
+        require(_initialized, "Contract not initialized");
+        _;
     }
-    
-    mapping(bytes32 => TimeLock) public timeLocks;
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
-    
-    // Multi-signature requirements
-    struct MultiSigProposal {
-        address target;
-        bytes data;
-        uint256 value;
-        uint256 confirmations;
-        mapping(address => bool) confirmed;
-        bool executed;
-        uint256 deadline;
-    }
-    
-    mapping(bytes32 => MultiSigProposal) public proposals;
-    uint256 public constant REQUIRED_CONFIRMATIONS = 2;
-    uint256 public constant PROPOSAL_DURATION = 7 days;
-    
-    // Events
-    event RoleGrantedSecure(bytes32 indexed role, address indexed account, address indexed sender, uint256 timestamp);
-    event RoleRevokedSecure(bytes32 indexed role, address indexed account, address indexed sender, uint256 timestamp);
-    event TimeLockScheduled(bytes32 indexed id, bytes32 operation, uint256 executeTime);
-    event TimeLockExecuted(bytes32 indexed id, bytes32 operation);
-    event MultiSigProposalCreated(bytes32 indexed proposalId, address indexed proposer, address target);
-    event MultiSigProposalConfirmed(bytes32 indexed proposalId, address indexed confirmer);
-    event MultiSigProposalExecuted(bytes32 indexed proposalId, bool success);
-    event EmergencyAction(address indexed executor, string action, uint256 timestamp);
-    event SecurityAlert(string alertType, address indexed user, uint256 value, uint256 timestamp);
-    
-    // Modifiers - using OpenZeppelin's built-in onlyRole
     
     modifier validAddress(address addr) {
-        require(addr != address(0), "Invalid address");
-        require(addr != address(this), "Cannot be contract address");
+        require(addr != address(0), "Invalid address: zero address");
+        require(addr != address(this), "Invalid address: contract address");
         _;
     }
     
-    modifier withinSupplyLimit(uint256 amount) {
-        require(totalSupply + amount <= MAX_SUPPLY, "Exceeds max supply");
+    modifier validAmount(uint256 amount) {
+        require(amount > 0, "Amount must be greater than zero");
         _;
     }
     
-    modifier respectsCooldown(address user) {
-        require(
-            block.timestamp >= lastWithdrawal[user] + WITHDRAWAL_COOLDOWN,
-            "Withdrawal cooldown not met"
-        );
-        _;
-    }
-    
-    modifier respectsDailyLimit(address user, uint256 amount) {
-        _resetDailyLimitIfNeeded(user);
-        require(
-            dailyWithdrawn[user] + amount <= DAILY_WITHDRAWAL_LIMIT,
-            "Daily withdrawal limit exceeded"
-        );
-        _;
-    }
-    
-    modifier validSignature(bytes32 hash, bytes memory signature, address signer) {
-        require(
-            _verifySignature(hash, signature, signer),
-            "Invalid signature"
-        );
-        _;
-    }
-    
-    modifier nonceNotUsed(bytes32 nonce) {
-        require(!usedNonces[nonce], "Nonce already used");
-        _;
-    }
-    
-    constructor() 
-        EIP712("AccessControlSecure", "1.0.0")
-    {
-        // Grant initial roles to deployer
-        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        _grantRole(ADMIN_ROLE, _msgSender());
-        _grantRole(EMERGENCY_ROLE, _msgSender());
+    constructor() {
+        // Grant all roles to the deployer initially
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(MINTER_ROLE, msg.sender);
+        _grantRole(PAUSER_ROLE, msg.sender);
+        _grantRole(BURNER_ROLE, msg.sender);
         
         // Set role admin relationships
         _setRoleAdmin(MINTER_ROLE, ADMIN_ROLE);
-        _setRoleAdmin(BURNER_ROLE, ADMIN_ROLE);
         _setRoleAdmin(PAUSER_ROLE, ADMIN_ROLE);
+        _setRoleAdmin(BURNER_ROLE, ADMIN_ROLE);
     }
     
     /**
-     * @dev Secure role granting with additional checks
+     * @dev Initialize the contract - only admin can call
      */
-    function grantRoleSecure(bytes32 role, address account) 
-        external 
-        onlyRole(getRoleAdmin(role))
-        validAddress(account)
-        whenNotPaused
-    {
-        require(role != DEFAULT_ADMIN_ROLE, "Cannot grant default admin role");
-        require(!hasRole(role, account), "Account already has role");
-        
-        _grantRole(role, account);
-        emit RoleGrantedSecure(role, account, _msgSender(), block.timestamp);
+    function initialize() external onlyRole(ADMIN_ROLE) {
+        require(!_initialized, "Already initialized");
+        _initialized = true;
+        _totalSupply = 0;
     }
     
     /**
-     * @dev Secure role revocation with additional checks
-     */
-    function revokeRoleSecure(bytes32 role, address account) 
-        external 
-        onlyRole(getRoleAdmin(role))
-        whenNotPaused
-    {
-        require(role != DEFAULT_ADMIN_ROLE, "Cannot revoke default admin role");
-        require(hasRole(role, account), "Account does not have role");
-        require(account != _msgSender(), "Cannot revoke own role");
-        
-        _revokeRole(role, account);
-        emit RoleRevokedSecure(role, account, _msgSender(), block.timestamp);
-    }
-    
-    /**
-     * @dev Secure minting with comprehensive checks
+     * @dev Mint tokens - only minter role can call
      */
     function mint(address to, uint256 amount) 
         external 
-        onlyRole(MINTER_ROLE)
-        validAddress(to)
-        withinSupplyLimit(amount)
+        onlyRole(MINTER_ROLE) 
+        onlyInitialized
         whenNotPaused
+        validAddress(to)
+        validAmount(amount)
         nonReentrant
     {
-        require(amount > 0, "Amount must be positive");
-        require(amount <= 10_000 ether, "Amount too large");
+        require(_totalSupply + amount <= _maxSupply, "Exceeds maximum supply");
         
-        balances[to] += amount;
-        totalSupply += amount;
+        _balances[to] += amount;
+        _totalSupply += amount;
         
+        emit Mint(to, amount);
         emit Transfer(address(0), to, amount);
     }
     
     /**
-     * @dev Secure burning with proper checks
+     * @dev Burn tokens - only burner role can call
      */
     function burn(address from, uint256 amount) 
         external 
-        onlyRole(BURNER_ROLE)
-        validAddress(from)
+        onlyRole(BURNER_ROLE) 
+        onlyInitialized
         whenNotPaused
+        validAddress(from)
+        validAmount(amount)
         nonReentrant
     {
-        require(amount > 0, "Amount must be positive");
-        require(balances[from] >= amount, "Insufficient balance");
+        require(_balances[from] >= amount, "Insufficient balance to burn");
         
-        balances[from] -= amount;
-        totalSupply -= amount;
+        _balances[from] -= amount;
+        _totalSupply -= amount;
         
+        emit Burn(from, amount);
         emit Transfer(from, address(0), amount);
     }
     
     /**
-     * @dev Secure withdrawal with rate limiting
+     * @dev Grant authorization - only admin can call
      */
-    function withdraw(uint256 amount) 
+    function grantAuthorization(address user) 
         external 
-        respectsCooldown(_msgSender())
-        respectsDailyLimit(_msgSender(), amount)
-        whenNotPaused
-        nonReentrant
+        onlyRole(ADMIN_ROLE) 
+        validAddress(user)
     {
-        require(amount > 0, "Amount must be positive");
-        require(balances[_msgSender()] >= amount, "Insufficient balance");
-        require(address(this).balance >= amount, "Insufficient contract balance");
-        
-        // Update state before external call
-        balances[_msgSender()] -= amount;
-        lastWithdrawal[_msgSender()] = block.timestamp;
-        dailyWithdrawn[_msgSender()] += amount;
-        
-        // External call
-        (bool success, ) = payable(_msgSender()).call{value: amount}("");
-        require(success, "Transfer failed");
-        
-        emit Withdrawal(_msgSender(), amount);
+        _authorized[user] = true;
+        emit AuthorizationGranted(user, msg.sender);
     }
     
     /**
-     * @dev Signature-based withdrawal for meta-transactions
+     * @dev Revoke authorization - only admin can call
      */
-    function withdrawWithSignature(
-        address user,
-        uint256 amount,
-        bytes32 nonce,
-        bytes memory signature
-    ) 
+    function revokeAuthorization(address user) 
         external 
-        respectsCooldown(user)
-        respectsDailyLimit(user, amount)
-        nonceNotUsed(nonce)
-        whenNotPaused
-        nonReentrant
+        onlyRole(ADMIN_ROLE) 
+        validAddress(user)
     {
-        bytes32 structHash = keccak256(abi.encode(
-            keccak256("Withdraw(address user,uint256 amount,bytes32 nonce)"),
-            user,
-            amount,
-            nonce
-        ));
-        
-        bytes32 hash = _hashTypedDataV4(structHash);
-        
-        require(
-            _verifySignature(hash, signature, user),
-            "Invalid signature"
-        );
-        
-        require(amount > 0, "Amount must be positive");
-        require(balances[user] >= amount, "Insufficient balance");
-        require(address(this).balance >= amount, "Insufficient contract balance");
-        
-        // Mark nonce as used
-        usedNonces[nonce] = true;
-        
-        // Update state
-        balances[user] -= amount;
-        lastWithdrawal[user] = block.timestamp;
-        dailyWithdrawn[user] += amount;
-        
-        // External call
-        (bool success, ) = payable(user).call{value: amount}("");
-        require(success, "Transfer failed");
-        
-        emit Withdrawal(user, amount);
+        _authorized[user] = false;
+        emit AuthorizationRevoked(user, msg.sender);
     }
     
     /**
-     * @dev Time-locked critical operation scheduling
+     * @dev Set maximum supply - only admin can call
      */
-    function scheduleTimeLock(bytes32 operation, bytes32 id) 
+    function setMaxSupply(uint256 newMaxSupply) 
         external 
-        onlyRole(ADMIN_ROLE)
-        whenNotPaused
+        onlyRole(ADMIN_ROLE) 
+        validAmount(newMaxSupply)
     {
-        require(timeLocks[id].executeTime == 0, "TimeLock already exists");
+        require(newMaxSupply >= _totalSupply, "New max supply cannot be less than current supply");
         
-        uint256 executeTime = block.timestamp + TIMELOCK_DELAY;
+        uint256 oldMaxSupply = _maxSupply;
+        _maxSupply = newMaxSupply;
         
-        timeLocks[id] = TimeLock({
-            executeTime: executeTime,
-            executed: false,
-            operation: operation
-        });
-        
-        emit TimeLockScheduled(id, operation, executeTime);
+        emit MaxSupplyChanged(oldMaxSupply, newMaxSupply);
     }
     
     /**
-     * @dev Execute time-locked operation
+     * @dev Pause contract - only pauser role can call
      */
-    function executeTimeLock(bytes32 id) 
-        external 
-        onlyRole(ADMIN_ROLE)
-        whenNotPaused
-    {
-        TimeLock storage timeLock = timeLocks[id];
-        
-        require(timeLock.executeTime != 0, "TimeLock does not exist");
-        require(!timeLock.executed, "TimeLock already executed");
-        require(block.timestamp >= timeLock.executeTime, "TimeLock not ready");
-        
-        timeLock.executed = true;
-        
-        emit TimeLockExecuted(id, timeLock.operation);
-    }
-    
-    /**
-     * @dev Create multi-signature proposal
-     */
-    function createMultiSigProposal(
-        address target,
-        bytes calldata data,
-        uint256 value
-    ) 
-        external 
-        onlyRole(ADMIN_ROLE)
-        validAddress(target)
-        whenNotPaused
-        returns (bytes32 proposalId)
-    {
-        proposalId = keccak256(abi.encodePacked(
-            target,
-            data,
-            value,
-            block.timestamp,
-            _msgSender()
-        ));
-        
-        MultiSigProposal storage proposal = proposals[proposalId];
-        require(proposal.deadline == 0, "Proposal already exists");
-        
-        proposal.target = target;
-        proposal.data = data;
-        proposal.value = value;
-        proposal.deadline = block.timestamp + PROPOSAL_DURATION;
-        proposal.confirmations = 1;
-        proposal.confirmed[_msgSender()] = true;
-        
-        emit MultiSigProposalCreated(proposalId, _msgSender(), target);
-        emit MultiSigProposalConfirmed(proposalId, _msgSender());
-        
-        return proposalId;
-    }
-    
-    /**
-     * @dev Confirm multi-signature proposal
-     */
-    function confirmMultiSigProposal(bytes32 proposalId) 
-        external 
-        onlyRole(ADMIN_ROLE)
-        whenNotPaused
-    {
-        MultiSigProposal storage proposal = proposals[proposalId];
-        
-        require(proposal.deadline != 0, "Proposal does not exist");
-        require(block.timestamp <= proposal.deadline, "Proposal expired");
-        require(!proposal.executed, "Proposal already executed");
-        require(!proposal.confirmed[_msgSender()], "Already confirmed");
-        
-        proposal.confirmed[_msgSender()] = true;
-        proposal.confirmations++;
-        
-        emit MultiSigProposalConfirmed(proposalId, _msgSender());
-    }
-    
-    /**
-     * @dev Execute multi-signature proposal
-     */
-    function executeMultiSigProposal(bytes32 proposalId) 
-        external 
-        onlyRole(ADMIN_ROLE)
-        whenNotPaused
-        nonReentrant
-    {
-        MultiSigProposal storage proposal = proposals[proposalId];
-        
-        require(proposal.deadline != 0, "Proposal does not exist");
-        require(block.timestamp <= proposal.deadline, "Proposal expired");
-        require(!proposal.executed, "Proposal already executed");
-        require(
-            proposal.confirmations >= REQUIRED_CONFIRMATIONS,
-            "Insufficient confirmations"
-        );
-        
-        proposal.executed = true;
-        
-        (bool success, ) = proposal.target.call{value: proposal.value}(proposal.data);
-        
-        emit MultiSigProposalExecuted(proposalId, success);
-    }
-    
-    /**
-     * @dev Emergency pause function
-     */
-    function emergencyPause() 
-        external 
-        onlyRole(EMERGENCY_ROLE)
-    {
+    function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
-        emit EmergencyAction(_msgSender(), "Emergency Pause", block.timestamp);
     }
     
     /**
-     * @dev Emergency unpause function
+     * @dev Unpause contract - only pauser role can call
      */
-    function emergencyUnpause() 
-        external 
-        onlyRole(EMERGENCY_ROLE)
-    {
+    function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
-        emit EmergencyAction(_msgSender(), "Emergency Unpause", block.timestamp);
     }
     
     /**
-     * @dev Batch operations with size limits
+     * @dev Emergency withdraw - only admin can call
      */
-    function batchMint(address[] calldata recipients, uint256[] calldata amounts) 
+    function emergencyWithdraw() 
         external 
-        onlyRole(MINTER_ROLE)
-        whenNotPaused
+        onlyRole(ADMIN_ROLE) 
         nonReentrant
     {
-        require(recipients.length == amounts.length, "Array length mismatch");
-        require(recipients.length <= MAX_BATCH_SIZE, "Batch too large");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
         
-        uint256 totalAmount = 0;
-        
-        // Calculate total amount first
-        for (uint256 i = 0; i < amounts.length; i++) {
-            require(amounts[i] > 0, "Amount must be positive");
-            totalAmount += amounts[i];
-        }
-        
-        require(totalSupply + totalAmount <= MAX_SUPPLY, "Exceeds max supply");
-        
-        // Execute mints
-        for (uint256 i = 0; i < recipients.length; i++) {
-            require(recipients[i] != address(0), "Invalid recipient");
-            balances[recipients[i]] += amounts[i];
-            emit Transfer(address(0), recipients[i], amounts[i]);
-        }
-        
-        totalSupply += totalAmount;
+        (bool success, ) = payable(msg.sender).call{value: balance}("");
+        require(success, "Withdrawal failed");
     }
     
     /**
-     * @dev Secure transfer function
+     * @dev Transfer tokens
      */
     function transfer(address to, uint256 amount) 
         external 
-        validAddress(to)
+        onlyInitialized
         whenNotPaused
+        validAddress(to)
+        validAmount(amount)
         nonReentrant
         returns (bool)
     {
-        require(amount > 0, "Amount must be positive");
-        require(balances[_msgSender()] >= amount, "Insufficient balance");
+        require(_balances[msg.sender] >= amount, "Insufficient balance");
         
-        balances[_msgSender()] -= amount;
-        balances[to] += amount;
+        _balances[msg.sender] -= amount;
+        _balances[to] += amount;
         
-        emit Transfer(_msgSender(), to, amount);
+        emit Transfer(msg.sender, to, amount);
         return true;
     }
     
     /**
-     * @dev Get user's daily withdrawal status
+     * @dev View functions
      */
-    function getDailyWithdrawalStatus(address user) 
-        external 
-        view 
-        returns (uint256 withdrawn, uint256 limit, uint256 remaining)
-    {
-        if (_shouldResetDailyLimit(user)) {
-            withdrawn = 0;
-        } else {
-            withdrawn = dailyWithdrawn[user];
-        }
-        
-        limit = DAILY_WITHDRAWAL_LIMIT;
-        remaining = limit > withdrawn ? limit - withdrawn : 0;
-        
-        return (withdrawn, limit, remaining);
+    function balanceOf(address account) external view returns (uint256) {
+        return _balances[account];
+    }
+    
+    function totalSupply() external view returns (uint256) {
+        return _totalSupply;
+    }
+    
+    function maxSupply() external view returns (uint256) {
+        return _maxSupply;
+    }
+    
+    function isAuthorized(address user) external view returns (bool) {
+        return _authorized[user];
+    }
+    
+    function initialized() external view returns (bool) {
+        return _initialized;
     }
     
     /**
-     * @dev Check if user can withdraw specific amount
+     * @dev Check if address has admin role
      */
-    function canWithdraw(address user, uint256 amount) 
-        external 
-        view 
-        returns (bool)
-    {
-        if (paused()) return false;
-        if (balances[user] < amount) return false;
-        if (address(this).balance < amount) return false;
-        if (block.timestamp < lastWithdrawal[user] + WITHDRAWAL_COOLDOWN) return false;
-        
-        uint256 currentWithdrawn = _shouldResetDailyLimit(user) ? 0 : dailyWithdrawn[user];
-        if (currentWithdrawn + amount > DAILY_WITHDRAWAL_LIMIT) return false;
-        
-        return true;
+    function isAdmin(address account) external view returns (bool) {
+        return hasRole(ADMIN_ROLE, account);
     }
     
     /**
-     * @dev Internal function to verify signatures
+     * @dev Check if address has minter role
      */
-    function _verifySignature(
-        bytes32 hash,
-        bytes memory signature,
-        address signer
-    ) internal pure returns (bool) {
-        return hash.recover(signature) == signer;
+    function isMinter(address account) external view returns (bool) {
+        return hasRole(MINTER_ROLE, account);
     }
     
     /**
-     * @dev Internal function to reset daily limit if needed
+     * @dev Check if address has pauser role
      */
-    function _resetDailyLimitIfNeeded(address user) internal {
-        if (_shouldResetDailyLimit(user)) {
-            dailyWithdrawn[user] = 0;
-            lastDailyReset[user] = block.timestamp;
-        }
+    function isPauser(address account) external view returns (bool) {
+        return hasRole(PAUSER_ROLE, account);
     }
     
     /**
-     * @dev Internal function to check if daily limit should be reset
+     * @dev Check if address has burner role
      */
-    function _shouldResetDailyLimit(address user) internal view returns (bool) {
-        return block.timestamp >= lastDailyReset[user] + 1 days;
+    function isBurner(address account) external view returns (bool) {
+        return hasRole(BURNER_ROLE, account);
     }
     
-    // Getter functions
-    function getBalance(address user) external view returns (uint256) {
-        return balances[user];
-    }
-    
-    function getContractBalance() external view returns (uint256) {
-        return address(this).balance;
-    }
-    
-    function getTotalSupply() external view returns (uint256) {
-        return totalSupply;
-    }
-    
-    function getLastWithdrawal(address user) external view returns (uint256) {
-        return lastWithdrawal[user];
-    }
-    
-    function getRoleMembers(bytes32 role) external view returns (address[] memory) {
-        // Note: This is a simplified implementation
-        // In production, you might want to maintain a separate enumerable set
-        address[] memory members = new address[](0);
-        return members;
-    }
-    
-    function getTimeLockInfo(bytes32 id) 
-        external 
-        view 
-        returns (uint256 executeTime, bool executed, bytes32 operation)
-    {
-        TimeLock storage timeLock = timeLocks[id];
-        return (timeLock.executeTime, timeLock.executed, timeLock.operation);
-    }
-    
-    function getMultiSigProposalInfo(bytes32 proposalId) 
-        external 
-        view 
-        returns (
-            address target,
-            uint256 value,
-            uint256 confirmations,
-            bool executed,
-            uint256 deadline
-        )
-    {
-        MultiSigProposal storage proposal = proposals[proposalId];
-        return (
-            proposal.target,
-            proposal.value,
-            proposal.confirmations,
-            proposal.executed,
-            proposal.deadline
-        );
-    }
-    
-    // Events for compatibility
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Withdrawal(address indexed user, uint256 amount);
-    
+    /**
+     * @dev Receive function to accept ETH
+     */
     receive() external payable {}
 }
 
 /**
  * @title AccessControlFactory
- * @dev Factory contract for deploying secure access control contracts
+ * @dev Factory contract for deploying AccessControlSecure contracts
  */
 contract AccessControlFactory is AccessControl {
-    bytes32 public constant DEPLOYER_ROLE = keccak256("DEPLOYER_ROLE");
-    
     address[] public deployedContracts;
     mapping(address => bool) public isDeployedContract;
     
     event ContractDeployed(address indexed contractAddress, address indexed deployer);
     
     constructor() {
-        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        _grantRole(DEPLOYER_ROLE, _msgSender());
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
     }
     
-    function deployAccessControlContract() 
-        external 
-        onlyRole(DEPLOYER_ROLE)
-        returns (address)
-    {
+    /**
+     * @dev Deploy a new AccessControlSecure contract
+     */
+    function deployAccessControlContract() external returns (address) {
         AccessControlSecure newContract = new AccessControlSecure();
         address contractAddress = address(newContract);
         
         deployedContracts.push(contractAddress);
         isDeployedContract[contractAddress] = true;
         
-        // Transfer ownership to deployer
-        newContract.transferOwnership(_msgSender());
-        
-        emit ContractDeployed(contractAddress, _msgSender());
-        
+        emit ContractDeployed(contractAddress, msg.sender);
         return contractAddress;
     }
     
+    /**
+     * @dev Get all deployed contracts
+     */
     function getDeployedContracts() external view returns (address[] memory) {
         return deployedContracts;
     }
     
+    /**
+     * @dev Get number of deployed contracts
+     */
     function getDeployedContractCount() external view returns (uint256) {
         return deployedContracts.length;
     }

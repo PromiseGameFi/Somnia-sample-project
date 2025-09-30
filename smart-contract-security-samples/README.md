@@ -21,27 +21,20 @@ smart-contract-security-samples/
 │   │   ├── ReentrancyVulnerable.sol
 │   │   ├── IntegerOverflowVulnerable.sol
 │   │   ├── AccessControlVulnerable.sol
-│   │   ├── OracleManipulationVulnerable.sol
-│   │   ├── UpgradeableVulnerable.sol
-│   │   ├── VulnerableBank.sol
-│   │   └── VulnerableWallet.sol
+│   │   └── UpgradeableVulnerable.sol
 │   └── secure/              # Secure implementations
 │       ├── ReentrancySecure.sol
 │       ├── IntegerOverflowSecure.sol
 │       ├── AccessControlSecure.sol
-│       ├── OracleManipulationSecure.sol
-│       ├── UpgradeableSecure.sol
-│       ├── SecureBank.sol
-│       └── SecureWallet.sol
+│       └── UpgradeableSecure.sol
 ├── scripts/                 # Deployment and demo scripts
 │   ├── deploy.js
 │   └── security-demo.js
 ├── test/                    # Comprehensive test suites
-│   ├── ReentrancyTest.t.sol
-│   ├── IntegerOverflowTest.t.sol
-│   ├── AccessControlTest.t.sol
-│   ├── OracleManipulationTest.t.sol
-│   └── UpgradeableTest.t.sol
+│   ├── Reentrancy.test.js
+│   ├── IntegerOverflow.test.js
+│   ├── AccessControl.test.js
+│   └── Upgradeable.test.js
 ├── docs/                    # Documentation
 │   ├── 01-overview.md
 │   ├── 02-vulnerabilities.md
@@ -243,18 +236,18 @@ forge doc                       # Generate docs
 ```javascript
 // Example interaction in Remix console
 
-// Deploy VulnerableBank
-const vulnerableBank = await VulnerableBank.deploy()
+// Deploy ReentrancyVulnerable
+const reentrancyVulnerable = await ReentrancyVulnerable.deploy()
 
 // Deposit funds
-await vulnerableBank.deposit({value: web3.utils.toWei("1", "ether")})
+await reentrancyVulnerable.deposit({value: web3.utils.toWei("1", "ether")})
 
 // Check balance
-const balance = await vulnerableBank.getBalance(accounts[0])
+const balance = await reentrancyVulnerable.getBalance(accounts[0])
 console.log("Balance:", web3.utils.fromWei(balance, "ether"), "ETH")
 
-// Deploy SecureBank for comparison
-const secureBank = await SecureBank.deploy()
+// Deploy ReentrancySecure for comparison
+const reentrancySecure = await ReentrancySecure.deploy()
 ```
 
 #### Remix Features
@@ -327,28 +320,23 @@ function showTab(framework) {
 ## 🔍 Security Vulnerabilities Covered
 
 ### 1. Reentrancy Attacks
-- **Vulnerable**: `VulnerableBank.sol` - Classic reentrancy in withdraw function
-- **Secure**: `SecureBank.sol` - Uses ReentrancyGuard and CEI pattern
+- **Vulnerable**: `ReentrancyVulnerable.sol` - Classic reentrancy in withdraw function
+- **Secure**: `ReentrancySecure.sol` - Uses ReentrancyGuard and CEI pattern
 - **Key Concepts**: Checks-Effects-Interactions, ReentrancyGuard, Pull-over-Push
 
 ### 2. Access Control Issues
-- **Vulnerable**: `VulnerableWallet.sol` - Missing access control on withdraw
-- **Secure**: `SecureWallet.sol` - Proper owner-only access control
+- **Vulnerable**: `AccessControlVulnerable.sol` - Missing access control and weak authentication
+- **Secure**: `AccessControlSecure.sol` - Proper role-based access control
 - **Key Concepts**: Role-based access, tx.origin vs msg.sender, Proper initialization
 
 ### 3. Integer Overflow/Underflow
-- **Vulnerable**: `IntegerOverflowVulnerable.sol`
-- **Secure**: `IntegerOverflowSecure.sol`
+- **Vulnerable**: `IntegerOverflowVulnerable.sol` - No overflow protection in Solidity < 0.8.0
+- **Secure**: `IntegerOverflowSecure.sol` - Uses SafeMath and proper validation
 - **Key Concepts**: SafeMath, Solidity 0.8+ protection, Input validation
 
-### 4. Oracle Manipulation
-- **Vulnerable**: `OracleManipulationVulnerable.sol`
-- **Secure**: `OracleManipulationSecure.sol`
-- **Key Concepts**: Price aggregation, TWAP, Circuit breakers, Stale price detection
-
-### 5. Upgradeable Contract Vulnerabilities
-- **Vulnerable**: `UpgradeableVulnerable.sol`
-- **Secure**: `UpgradeableSecure.sol`
+### 4. Upgradeable Contract Vulnerabilities
+- **Vulnerable**: `UpgradeableVulnerable.sol` - Unprotected upgrades and storage collisions
+- **Secure**: `UpgradeableSecure.sol` - Proper upgrade mechanisms with access control
 - **Key Concepts**: Storage collisions, Initialization, Upgrade authorization, Timelocks
 
 ## 📊 Security Analysis Tools
@@ -371,7 +359,7 @@ slither . --print human-summary
 
 ### Other Security Tools
 
-- **Mythril**: `myth analyze contracts/vulnerable/VulnerableBank.sol`
+- **Mythril**: `myth analyze contracts/vulnerable/ReentrancyVulnerable.sol`
 - **Manticore**: Symbolic execution for deep analysis
 - **Echidna**: Property-based fuzzing
 - **MythX**: Professional security analysis platform
