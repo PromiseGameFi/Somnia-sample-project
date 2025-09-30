@@ -1,162 +1,83 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.18;
 
 /**
  * @title AccessControlVulnerable
- * @dev Demonstrates common access control vulnerabilities
- * 
- * VULNERABILITIES DEMONSTRATED:
- * 1. Missing access control on critical functions
- * 2. Weak authentication using tx.origin
- * 3. No role-based access control
- * 4. Anyone can call admin functions
- * 5. Improper ownership management
+ * @notice Naive, intentionally vulnerable role-based access control example for education.
+ * @dev This file is written for Remix (no external imports). It demonstrates bad authorization patterns.
+ *
+ * === How to use (Remix) ===
+ * - Deploy the contract (deployer receives ADMIN and WRITER).
+ * - Any account holding a role can call grantRole to grant the same role to others.
+ * - Use this to demonstrate role escalation and why owner separation and events matter.
+ *
+ * === WHAT'S WRONG / WHY IT'S VULNERABLE ===
+ * - Authorization model: any holder of a role can grant that same role to others (role escalation).
+ * - No owner/admin separation for sensitive roles (ADMIN should be restricted to owner/guardian).
+ * - No events for role changes — poor auditability.
+ * - No protections against malicious revocation or accidental locking-out.
  */
 contract AccessControlVulnerable {
-    address public owner;
-    address public admin;
-    mapping(address => uint256) public balances;
-    mapping(address => bool) public authorized;
-    uint256 public totalSupply;
-    uint256 public maxSupply = 1000000 * 10**18;
-    bool public initialized;
-    bool public paused;
-    
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Mint(address indexed to, uint256 amount);
-    event Burn(address indexed from, uint256 amount);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    
+    // role => account => bool
+    mapping(bytes32 => mapping(address => bool)) public roles;
+
+    bytes32 public constant ADMIN = keccak256("ADMIN");
+    bytes32 public constant WRITER = keccak256("WRITER");
+
+    // Example protected data
+    string public data;
+
+    /**
+     * @dev Deployer gets both roles initially.
+     */
     constructor() {
-        owner = msg.sender;
-        admin = msg.sender;
+        roles[ADMIN][msg.sender] = true;
+        roles[WRITER][msg.sender] = true;
     }
-    
+
     /**
-     * @dev VULNERABLE: No access control - anyone can initialize
+     * @notice Grant a role to `account`.
+     * @dev VULNERABLE: Only checks that caller already has the same role;
+     *      this allows role escalation once a role exists on any account.
      */
-    function initialize() external {
-        require(!initialized, "Already initialized");
-        initialized = true;
-        totalSupply = 0;
+    function grantRole(bytes32 role, address account) external {
+        require(account != address(0), "zero account");
+        // BAD: any role-holder can grant the same role to others
+        require(roles[role][msg.sender], "only role-holder");
+        roles[role][account] = true;
     }
-    
+
     /**
-     * @dev VULNERABLE: No access control - anyone can mint tokens
+     * @notice Revoke a role from `account`.
+     * @dev VULNERABLE: Any holder of the role can revoke it from others.
      */
-    function mint(address to, uint256 amount) external {
-        require(to != address(0), "Invalid address");
-        require(totalSupply + amount <= maxSupply, "Exceeds max supply");
-        
-        balances[to] += amount;
-        totalSupply += amount;
-        
-        emit Mint(to, amount);
-        emit Transfer(address(0), to, amount);
+    function revokeRole(bytes32 role, address account) external {
+        require(roles[role][msg.sender], "only role-holder");
+        roles[role][account] = false;
     }
-    
+
     /**
-     * @dev VULNERABLE: No access control - anyone can burn tokens
+     * @notice Write new data (requires WRITER).
+     * @dev No events and no logging of who changed the data.
      */
-    function burn(address from, uint256 amount) external {
-        require(balances[from] >= amount, "Insufficient balance");
-        
-        balances[from] -= amount;
-        totalSupply -= amount;
-        
-        emit Burn(from, amount);
-        emit Transfer(from, address(0), amount);
+    function write(string calldata newData) external {
+        require(roles[WRITER][msg.sender], "not writer");
+        data = newData;
     }
-    
+
     /**
-     * @dev VULNERABLE: Uses tx.origin instead of msg.sender
+     * @notice Emergency reset (requires ADMIN).
+     * @dev If ADMIN is compromised, attacker can clear state.
      */
-    function authenticate(address user) external {
-        require(tx.origin == owner, "Not authorized");
-        authorized[user] = true;
+    function emergencyReset() external {
+        require(roles[ADMIN][msg.sender], "not admin");
+        data = "";
     }
-    
+
     /**
-     * @dev VULNERABLE: No access control - anyone can change owner
+     * @notice Check role membership.
      */
-    function transferOwnership(address newOwner) external {
-        require(newOwner != address(0), "Invalid address");
-        
-        address previousOwner = owner;
-        owner = newOwner;
-        
-        emit OwnershipTransferred(previousOwner, newOwner);
+    function hasRole(bytes32 role, address account) external view returns (bool) {
+        return roles[role][account];
     }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can pause
-     */
-    function pause() external {
-        paused = true;
-    }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can unpause
-     */
-    function unpause() external {
-        paused = false;
-    }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can change admin
-     */
-    function changeAdmin(address newAdmin) external {
-        require(newAdmin != address(0), "Invalid address");
-        admin = newAdmin;
-    }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can set max supply
-     */
-    function setMaxSupply(uint256 _maxSupply) external {
-        maxSupply = _maxSupply;
-    }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can withdraw funds
-     */
-    function emergencyWithdraw() external {
-        payable(msg.sender).transfer(address(this).balance);
-    }
-    
-    /**
-     * @dev VULNERABLE: No access control - anyone can reset authorization
-     */
-    function revokeAuthorization(address user) external {
-        authorized[user] = false;
-    }
-    
-    /**
-     * @dev Basic transfer function
-     */
-    function transfer(address to, uint256 amount) external {
-        require(to != address(0), "Invalid address");
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        
-        balances[msg.sender] -= amount;
-        balances[to] += amount;
-        
-        emit Transfer(msg.sender, to, amount);
-    }
-    
-    /**
-     * @dev View functions
-     */
-    function balanceOf(address account) external view returns (uint256) {
-        return balances[account];
-    }
-    
-    function isAuthorized(address user) external view returns (bool) {
-        return authorized[user];
-    }
-    
-    /**
-     * @dev Receive function to accept ETH
-     */
-    receive() external payable {}
 }
