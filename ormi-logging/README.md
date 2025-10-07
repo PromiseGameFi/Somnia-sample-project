@@ -179,29 +179,5 @@ CMD ["npm", "start"]
 ## 📚 Documentation
 
 For detailed implementation guide, see:
-- [ORMI API Logging & Health Monitoring Tutorial](../../../ormi-api/ormi-api-logging-health-monitoring.md)
 - [Somnia Developer Documentation](https://docs.somnia.network)
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - see LICENSE file for details
-
-## 🆘 Support
-
-For issues and questions:
-- Check the troubleshooting section in the main tutorial
-- Review logs in the `logs/` directory
-- Verify environment configuration
-- Test API connectivity manually
-
----
-
-**Built for Somnia Testnet with MultiStream BFT consensus** 🚀
