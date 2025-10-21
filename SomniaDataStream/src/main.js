@@ -54,12 +54,18 @@ class SomniaSpaceRaiders {
         if (this.isGameRunning) return;
         
         try {
+            console.log('🎮 Starting game...');
+            
             // Show loading screen
             this.uiManager.showLoadingScreen('Connecting to Somnia Network...');
             
+            console.log('🔗 Attempting to connect to Somnia...');
             // Connect to Somnia
-            await this.somniaConnector.connect();
+            const connectionResult = await this.somniaConnector.connect();
+            console.log('🔗 Connection result:', connectionResult);
+            
             this.uiManager.updateConnectionStatus(true);
+            console.log('✅ Connection status updated');
             
             // Initialize game
             this.uiManager.showLoadingScreen('Initializing Game Engine...');
@@ -78,9 +84,14 @@ class SomniaSpaceRaiders {
             
         } catch (error) {
             console.error('❌ Failed to start game:', error);
+            console.error('❌ Error details:', {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            });
             this.uiManager.hideLoadingScreen();
             this.uiManager.updateConnectionStatus(false);
-            alert('Failed to connect to Somnia network. Please check your connection and try again.');
+            alert(`Failed to connect to Somnia network. Error: ${error.message}`);
         }
     }
 

@@ -1,31 +1,42 @@
-import * as THREE from 'three';
 import { Player } from './entities/Player.js';
 import { Enemy } from './entities/Enemy.js';
-import { PowerUp } from './entities/PowerUp.js';
-import { Projectile } from './entities/Projectile.js';
-import { InputManager } from './InputManager.js';
-import { GameState } from './GameState.js';
+import { InputManager } from './systems/InputManager.js';
+import { GameState } from './systems/GameState.js';
+import { DataStreamVisualizer } from './systems/DataStreamVisualizer.js';
+import { LevelManager } from './systems/LevelManager.js';
+import { GameUI } from './ui/GameUI.js';
 
 export class Game {
-    constructor(somniaConnector, uiManager) {
+    constructor(canvas, somniaConnector) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
         this.somniaConnector = somniaConnector;
-        this.uiManager = uiManager;
         
-        // Three.js components
-        this.scene = null;
-        this.camera = null;
-        this.renderer = null;
+        // Canvas dimensions
+        this.width = canvas.width;
+        this.height = canvas.height;
+        
+        // Camera for 2D side-scrolling
+        this.camera = {
+            x: 0,
+            y: 0,
+            targetX: 0,
+            targetY: 0,
+            smoothing: 0.1
+        };
         
         // Game entities
         this.player = null;
         this.enemies = [];
-        this.powerUps = [];
         this.projectiles = [];
         this.particles = [];
         
         // Game systems
-        this.inputManager = null;
-        this.gameState = null;
+        this.inputManager = new InputManager();
+        this.gameState = new GameState();
+        this.dataStreamVisualizer = new DataStreamVisualizer(somniaConnector);
+        this.levelManager = new LevelManager(this);
+        this.gameUI = new GameUI(this);
         
         // Game loop
         this.isRunning = false;
@@ -35,250 +46,147 @@ export class Game {
         
         // Game settings
         this.settings = {
-            maxEnemies: 10,
-            maxPowerUps: 5,
-            enemySpawnRate: 0.02,
-            powerUpSpawnRate: 0.005,
-            worldSize: 100
+            gravity: 0.8,
+            maxEnemies: 5,
+            maxCollectibles: 8,
+            enemySpawnRate: 0.01,
+            collectibleSpawnRate: 0.008,
+            worldWidth: 2400,
+            worldHeight: 600
         };
+        
+        // Debug mode
+        this.debug = false;
+        
+        // Level design
+        this.currentLevel = 1;
+        this.levelData = this.generateLevel();
         
         // Performance monitoring
         this.frameCount = 0;
         this.lastFPSUpdate = 0;
         this.fps = 0;
+        
+        console.log('🎮 2D Platformer Game initialized');
     }
 
     async init() {
-        console.log('🎮 Initializing game engine...');
-        
         try {
-            // Initialize Three.js
-            this.initThreeJS();
+            this.setupCanvas();
+            this.setupGameSystems();
+            await this.createGameEntities();
+            this.setupEventListeners();
             
-            // Initialize game systems
-            this.inputManager = new InputManager();
-            this.gameState = new GameState();
-            
-            // Create game world
-            this.createWorld();
-            
-            // Initialize player
-            this.player = new Player(this.scene, this.somniaConnector);
-            await this.player.init();
-            
-            // Set up camera to follow player
-            this.setupCamera();
-            
-            // Set up blockchain event listeners
-            this.setupBlockchainEvents();
-            
-            // Initialize UI updates
-            this.setupUIUpdates();
-            
-            console.log('✅ Game engine initialized successfully!');
-            
+            console.log('✅ Game initialization complete');
+            return true;
         } catch (error) {
-            console.error('❌ Failed to initialize game:', error);
-            throw error;
+            console.error('❌ Game initialization failed:', error);
+            return false;
         }
     }
 
-    initThreeJS() {
-        // Create scene
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000011);
+    setupCanvas() {
+        // Canvas is already provided in constructor
+        this.canvas.style.border = '2px solid #00aaff';
+        this.canvas.style.background = 'linear-gradient(180deg, #001122 0%, #003366 100%)';
         
-        // Create camera
-        this.camera = new THREE.PerspectiveCamera(
-            75,
-            window.innerWidth / window.innerHeight,
-            0.1,
-            1000
-        );
-        
-        // Create renderer
-        const canvas = document.getElementById('gameCanvas');
-        this.renderer = new THREE.WebGLRenderer({ 
-            canvas: canvas,
-            antialias: true,
-            alpha: false
-        });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        
-        // Add lighting
-        this.setupLighting();
-        
-        console.log('🌟 Three.js initialized');
+        console.log('🖼️ Canvas setup complete');
     }
 
-    setupLighting() {
-        // Ambient light
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
-        this.scene.add(ambientLight);
+    setupGameSystems() {
+        // Initialize data stream monitoring
+        this.dataStreamVisualizer.init();
         
-        // Directional light (sun)
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(50, 50, 50);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 2048;
-        directionalLight.shadow.mapSize.height = 2048;
-        directionalLight.shadow.camera.near = 0.5;
-        directionalLight.shadow.camera.far = 500;
-        directionalLight.shadow.camera.left = -100;
-        directionalLight.shadow.camera.right = 100;
-        directionalLight.shadow.camera.top = 100;
-        directionalLight.shadow.camera.bottom = -100;
-        this.scene.add(directionalLight);
-        
-        // Point lights for atmosphere
-        const colors = [0x00ffff, 0xff00ff, 0xffff00];
-        for (let i = 0; i < 3; i++) {
-            const pointLight = new THREE.PointLight(colors[i], 0.5, 50);
-            pointLight.position.set(
-                (Math.random() - 0.5) * 200,
-                Math.random() * 50 + 10,
-                (Math.random() - 0.5) * 200
-            );
-            this.scene.add(pointLight);
-        }
+        console.log('⚙️ Game systems initialized');
     }
 
-    createWorld() {
-        // Create starfield
-        this.createStarfield();
+    async createGameEntities() {
+        // Create player
+        this.player = new Player(this.somniaConnector);
+        await this.player.init();
+        this.player.setPosition(100, this.height - 150);
         
-        // Create space platform/arena
-        this.createArena();
+        // Create platforms from level data
+        this.createPlatforms();
         
-        // Create boundary walls
-        this.createBoundaries();
+        // Create initial enemies
+        this.spawnEnemies();
+        
+        // Create initial collectibles
+        this.spawnCollectibles();
+        
+        console.log('🎯 Game entities created');
     }
 
-    createStarfield() {
-        const starsGeometry = new THREE.BufferGeometry();
-        const starsMaterial = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 2,
-            sizeAttenuation: false
-        });
-        
-        const starsVertices = [];
-        for (let i = 0; i < 10000; i++) {
-            const x = (Math.random() - 0.5) * 2000;
-            const y = (Math.random() - 0.5) * 2000;
-            const z = (Math.random() - 0.5) * 2000;
-            starsVertices.push(x, y, z);
-        }
-        
-        starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
-        const stars = new THREE.Points(starsGeometry, starsMaterial);
-        this.scene.add(stars);
+    generateLevel() {
+        // Simple level with platforms
+        return {
+            platforms: [
+                { x: 0, y: this.height - 40, width: 200, height: 40 },
+                { x: 300, y: this.height - 120, width: 150, height: 20 },
+                { x: 500, y: this.height - 200, width: 120, height: 20 },
+                { x: 700, y: this.height - 160, width: 100, height: 20 },
+                { x: 900, y: this.height - 240, width: 150, height: 20 },
+                { x: 1100, y: this.height - 180, width: 120, height: 20 },
+                { x: 1300, y: this.height - 120, width: 200, height: 20 },
+                { x: 1600, y: this.height - 200, width: 150, height: 20 },
+                { x: 1800, y: this.height - 280, width: 120, height: 20 },
+                { x: 2000, y: this.height - 160, width: 400, height: 40 }
+            ],
+            enemies: [
+                { x: 350, y: this.height - 140, type: 'patrol' },
+                { x: 550, y: this.height - 220, type: 'guard' },
+                { x: 950, y: this.height - 260, type: 'patrol' },
+                { x: 1350, y: this.height - 140, type: 'guard' },
+                { x: 1850, y: this.height - 300, type: 'patrol' }
+            ],
+            collectibles: [
+                { x: 320, y: this.height - 150, type: 'data' },
+                { x: 520, y: this.height - 230, type: 'energy' },
+                { x: 720, y: this.height - 190, type: 'data' },
+                { x: 920, y: this.height - 270, type: 'health' },
+                { x: 1120, y: this.height - 210, type: 'data' },
+                { x: 1320, y: this.height - 150, type: 'energy' },
+                { x: 1620, y: this.height - 230, type: 'data' },
+                { x: 1820, y: this.height - 310, type: 'health' }
+            ]
+        };
     }
 
-    createArena() {
-        // Create main platform
-        const platformGeometry = new THREE.CylinderGeometry(50, 50, 2, 32);
-        const platformMaterial = new THREE.MeshLambertMaterial({
-            color: 0x333333,
-            transparent: true,
-            opacity: 0.8
-        });
-        const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-        platform.position.y = -1;
-        platform.receiveShadow = true;
-        this.scene.add(platform);
-        
-        // Add platform glow effect
-        const glowGeometry = new THREE.RingGeometry(48, 52, 32);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: 0x00ffff,
-            transparent: true,
-            opacity: 0.3,
-            side: THREE.DoubleSide
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.rotation.x = -Math.PI / 2;
-        glow.position.y = 0.1;
-        this.scene.add(glow);
-    }
-
-    createBoundaries() {
-        // Create invisible boundary walls
-        const boundarySize = this.settings.worldSize;
-        const wallHeight = 20;
-        const wallThickness = 1;
-        
-        const wallMaterial = new THREE.MeshBasicMaterial({
-            color: 0xff0000,
-            transparent: true,
-            opacity: 0.1,
-            wireframe: true
-        });
-        
-        // Create 4 walls
-        const positions = [
-            { x: boundarySize / 2, z: 0, rotY: 0 },
-            { x: -boundarySize / 2, z: 0, rotY: 0 },
-            { x: 0, z: boundarySize / 2, rotY: Math.PI / 2 },
-            { x: 0, z: -boundarySize / 2, rotY: Math.PI / 2 }
-        ];
-        
-        positions.forEach(pos => {
-            const wallGeometry = new THREE.BoxGeometry(wallThickness, wallHeight, boundarySize);
-            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-            wall.position.set(pos.x, wallHeight / 2, pos.z);
-            wall.rotation.y = pos.rotY;
-            this.scene.add(wall);
+    createPlatforms() {
+        this.platforms = [];
+        this.levelData.platforms.forEach(platformData => {
+            const platform = new Platform(platformData.x, platformData.y, platformData.width, platformData.height);
+            this.platforms.push(platform);
         });
     }
 
-    setupCamera() {
-        // Position camera behind and above player
-        this.camera.position.set(0, 10, 15);
-        this.camera.lookAt(0, 0, 0);
-    }
-
-    setupBlockchainEvents() {
-        // Listen for blockchain events
-        this.somniaConnector.on('playerMoved', (data) => {
-            console.log('📍 Player moved on blockchain:', data);
-        });
-        
-        this.somniaConnector.on('weaponFired', (data) => {
-            console.log('🔫 Weapon fired on blockchain:', data);
-            this.createWeaponEffect(data);
-        });
-        
-        this.somniaConnector.on('powerUpCollected', (data) => {
-            console.log('⚡ Power-up collected on blockchain:', data);
-            this.uiManager.showNotification('Power-up collected!', 'success');
-        });
-        
-        this.somniaConnector.on('scoreUpdated', (data) => {
-            console.log('🏆 Score updated on blockchain:', data);
-            this.gameState.updateScore(data.newScore);
+    spawnEnemies() {
+        this.enemies = [];
+        this.levelData.enemies.forEach(enemyData => {
+            const enemy = new Enemy(enemyData.x, enemyData.y, enemyData.type);
+            enemy.init();
+            this.enemies.push(enemy);
         });
     }
 
-    setupUIUpdates() {
-        // Update UI periodically
-        setInterval(() => {
-            this.updateUI();
-        }, 100); // Update every 100ms for smooth UI
+    spawnCollectibles() {
+        this.collectibles = [];
+        this.levelData.collectibles.forEach(collectibleData => {
+            const collectible = new Collectible(collectibleData.x, collectibleData.y, collectibleData.type);
+            this.collectibles.push(collectible);
+        });
     }
 
-    updateUI() {
-        if (!this.gameState || !this.player) return;
+    setupEventListeners() {
+        // Canvas focus for input
+        this.canvas.tabIndex = 1;
+        this.canvas.focus();
         
-        // Update player stats
-        this.uiManager.updatePlayerStats({
-            score: this.gameState.score,
-            health: this.player.health,
-            energy: this.player.energy,
-            level: this.gameState.level
-        });
+        // Prevent context menu
+        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        
+        console.log('🎧 Event listeners setup');
     }
 
     start() {
@@ -287,17 +195,28 @@ export class Game {
         this.isRunning = true;
         this.isPaused = false;
         this.lastTime = performance.now();
-        
-        // Start game loop
         this.gameLoop();
         
-        console.log('🚀 Game started!');
+        console.log('▶️ Game started');
     }
 
-    gameLoop() {
+    pause() {
+        this.isPaused = !this.isPaused;
+        console.log(this.isPaused ? '⏸️ Game paused' : '▶️ Game resumed');
+    }
+
+    stop() {
+        this.isRunning = false;
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        console.log('⏹️ Game stopped');
+    }
+
+    gameLoop(currentTime = performance.now()) {
         if (!this.isRunning) return;
         
-        const currentTime = performance.now();
         const deltaTime = (currentTime - this.lastTime) / 1000;
         this.lastTime = currentTime;
         
@@ -306,92 +225,133 @@ export class Game {
             this.render();
         }
         
-        // Update FPS counter
         this.updateFPS(currentTime);
-        
-        this.animationId = requestAnimationFrame(() => this.gameLoop());
+        this.animationId = requestAnimationFrame((time) => this.gameLoop(time));
     }
 
     update(deltaTime) {
+        if (this.isPaused) return;
+
+        this.deltaTime = deltaTime;
+
         // Update input
         this.inputManager.update();
         
+        // Update game systems
+        this.gameState.update(deltaTime);
+        this.dataStreamVisualizer.update(deltaTime);
+        this.levelManager.update(deltaTime);
+        this.gameUI.update(deltaTime);
+        
         // Update player
         if (this.player) {
-            this.player.update(deltaTime, this.inputManager);
-            this.updateCameraFollow();
+            this.player.update(deltaTime, this.inputManager, this.levelManager.getPlatforms());
         }
         
-        // Update enemies
-        this.updateEnemies(deltaTime);
+        // Update camera to follow player
+        this.updateCamera();
         
-        // Update power-ups
-        this.updatePowerUps(deltaTime);
+        // Spawn enemies from level manager
+        const readySpawns = this.levelManager.getReadySpawnPoints();
+        readySpawns.forEach(spawn => {
+            if (this.enemies.length < 8) { // Limit concurrent enemies
+                const enemy = new Enemy(spawn.x, spawn.y, this.somniaConnector);
+                enemy.type = spawn.type;
+                this.enemies.push(enemy);
+                this.levelManager.useSpawnPoint(spawn);
+            }
+        });
+        
+        // Update enemies
+        this.enemies.forEach((enemy, index) => {
+            enemy.update(deltaTime, this.player, this.levelManager.getPlatforms());
+            
+            // Remove dead enemies
+            if (enemy.health <= 0) {
+                this.gameState.addScore(enemy.scoreValue || 50);
+                this.enemies.splice(index, 1);
+            }
+        });
         
         // Update projectiles
         this.updateProjectiles(deltaTime);
         
+        // Update collectibles
+        this.updateCollectibles(deltaTime);
+        
         // Update particles
         this.updateParticles(deltaTime);
-        
-        // Spawn new entities
-        this.spawnEntities();
         
         // Check collisions
         this.checkCollisions();
         
-        // Update game state
-        this.gameState.update(deltaTime);
+        // Spawn new entities if needed
+        this.spawnNewEntities();
         
-        // Send position updates to blockchain (throttled)
-        this.updateBlockchainPosition();
-    }
-
-    updateCameraFollow() {
-        if (!this.player) return;
-        
-        const playerPos = this.player.getPosition();
-        const targetPos = new THREE.Vector3(
-            playerPos.x,
-            playerPos.y + 10,
-            playerPos.z + 15
-        );
-        
-        // Smooth camera follow
-        this.camera.position.lerp(targetPos, 0.05);
-        this.camera.lookAt(playerPos);
-    }
-
-    updateEnemies(deltaTime) {
-        for (let i = this.enemies.length - 1; i >= 0; i--) {
-            const enemy = this.enemies[i];
-            enemy.update(deltaTime, this.player);
-            
-            // Remove dead enemies
-            if (enemy.isDead()) {
-                enemy.destroy();
-                this.scene.remove(enemy.mesh);
-                this.enemies.splice(i, 1);
-                
-                // Award points
-                this.gameState.addScore(100);
-                this.somniaConnector.updateScore(this.gameState.score);
-            }
+        // Check for level completion
+        if (this.enemies.length === 0 && this.levelManager.getCollectibles().length === 0) {
+            this.nextLevel();
         }
     }
 
-    updatePowerUps(deltaTime) {
-        for (let i = this.powerUps.length - 1; i >= 0; i--) {
-            const powerUp = this.powerUps[i];
-            powerUp.update(deltaTime);
-            
-            // Remove expired power-ups
-            if (powerUp.isExpired()) {
-                powerUp.destroy();
-                this.scene.remove(powerUp.mesh);
-                this.powerUps.splice(i, 1);
-            }
+    nextLevel() {
+        this.levelManager.nextLevel();
+        
+        // Reset player position
+        if (this.player) {
+            this.player.x = 100;
+            this.player.y = this.height - 150;
+            this.player.health = Math.min(100, this.player.health + 25); // Heal on level up
+            this.player.energy = 100;
         }
+        
+        // Clear enemies and projectiles
+        this.enemies = [];
+        this.projectiles = [];
+        
+        console.log(`🎯 Advanced to level ${this.levelManager.getCurrentLevel()}`);
+    }
+
+    checkCollision(obj1, obj2) {
+        return obj1.x < obj2.x + obj2.width &&
+               obj1.x + obj1.width > obj2.x &&
+               obj1.y < obj2.y + obj2.height &&
+               obj1.y + obj1.height > obj2.y;
+    }
+
+    toggleDebug() {
+        this.debug = !this.debug;
+        console.log(`Debug mode: ${this.debug ? 'ON' : 'OFF'}`);
+    }
+
+    getGameState() {
+        return {
+            level: this.levelManager.getCurrentLevel(),
+            score: this.gameState.score,
+            playerHealth: this.player ? this.player.health : 0,
+            playerEnergy: this.player ? this.player.energy : 0,
+            enemiesRemaining: this.enemies.length,
+            collectiblesRemaining: this.collectibles.length
+        };
+
+        // Handle input for UI
+        if (this.inputManager.isKeyPressed('F3')) {
+            this.gameUI.handleInput('F3');
+        }
+    }
+
+    updateCamera() {
+        // Follow player with smooth camera movement
+        this.camera.targetX = this.player.x - this.width / 2;
+        this.camera.targetY = this.player.y - this.height / 2;
+        
+        // Clamp camera to world bounds
+        this.camera.targetX = Math.max(0, Math.min(this.settings.worldWidth - this.width, this.camera.targetX));
+        this.camera.targetY = Math.max(0, Math.min(this.settings.worldHeight - this.height, this.camera.targetY));
+        
+        // Smooth camera movement
+        this.camera.x += (this.camera.targetX - this.camera.x) * this.camera.smoothing;
+        this.camera.y += (this.camera.targetY - this.camera.y) * this.camera.smoothing;
     }
 
     updateProjectiles(deltaTime) {
@@ -399,261 +359,294 @@ export class Game {
             const projectile = this.projectiles[i];
             projectile.update(deltaTime);
             
-            // Remove expired projectiles
-            if (projectile.isExpired()) {
-                projectile.destroy();
-                this.scene.remove(projectile.mesh);
+            // Check collisions with enemies
+            if (projectile.owner === 'player') {
+                this.enemies.forEach(enemy => {
+                    if (this.checkCollision(projectile, enemy)) {
+                        enemy.takeDamage(projectile.damage);
+                        this.projectiles.splice(i, 1);
+                    }
+                });
+            }
+            
+            // Check collisions with player
+            if (projectile.owner === 'enemy' && this.player) {
+                if (this.checkCollision(projectile, this.player)) {
+                    this.player.takeDamage(projectile.damage);
+                    this.projectiles.splice(i, 1);
+                }
+            }
+            
+            // Remove projectiles that are out of bounds or expired
+            if (projectile.x < -50 || projectile.x > this.settings.worldWidth + 50 || 
+                projectile.y < -50 || projectile.y > this.settings.worldHeight + 50 ||
+                projectile.lifetime <= 0) {
                 this.projectiles.splice(i, 1);
             }
         }
     }
 
+    updateCollectibles(deltaTime) {
+        this.collectibles.forEach(collectible => {
+            collectible.update(deltaTime);
+        });
+    }
+
     updateParticles(deltaTime) {
-        // Update particle systems (placeholder)
-        // In a full implementation, this would handle visual effects
-    }
-
-    spawnEntities() {
-        // Spawn enemies
-        if (this.enemies.length < this.settings.maxEnemies && Math.random() < this.settings.enemySpawnRate) {
-            this.spawnEnemy();
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const particle = this.particles[i];
+            particle.update(deltaTime);
+            
+            if (particle.lifetime <= 0) {
+                this.particles.splice(i, 1);
+            }
         }
-        
-        // Spawn power-ups
-        if (this.powerUps.length < this.settings.maxPowerUps && Math.random() < this.settings.powerUpSpawnRate) {
-            this.spawnPowerUp();
-        }
-    }
-
-    spawnEnemy() {
-        const enemy = new Enemy(this.scene);
-        enemy.init();
-        
-        // Random spawn position around the arena
-        const angle = Math.random() * Math.PI * 2;
-        const distance = 30 + Math.random() * 20;
-        enemy.setPosition(
-            Math.cos(angle) * distance,
-            Math.random() * 10 + 5,
-            Math.sin(angle) * distance
-        );
-        
-        this.enemies.push(enemy);
-    }
-
-    spawnPowerUp() {
-        const powerUp = new PowerUp(this.scene);
-        powerUp.init();
-        
-        // Random spawn position on the platform
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 40;
-        powerUp.setPosition(
-            Math.cos(angle) * distance,
-            2,
-            Math.sin(angle) * distance
-        );
-        
-        this.powerUps.push(powerUp);
     }
 
     checkCollisions() {
-        if (!this.player) return;
-        
-        const playerPos = this.player.getPosition();
-        const playerRadius = this.player.getRadius();
-        
-        // Check power-up collisions
-        for (let i = this.powerUps.length - 1; i >= 0; i--) {
-            const powerUp = this.powerUps[i];
-            const distance = playerPos.distanceTo(powerUp.getPosition());
-            
-            if (distance < playerRadius + powerUp.getRadius()) {
-                // Collect power-up
-                this.collectPowerUp(powerUp, i);
+        // Player vs collectibles
+        for (let i = this.collectibles.length - 1; i >= 0; i--) {
+            const collectible = this.collectibles[i];
+            if (this.player.checkCollision(collectible)) {
+                this.collectItem(collectible);
+                this.collectibles.splice(i, 1);
             }
         }
         
-        // Check enemy collisions
-        for (const enemy of this.enemies) {
-            const distance = playerPos.distanceTo(enemy.getPosition());
-            
-            if (distance < playerRadius + enemy.getRadius()) {
-                // Player hit by enemy
+        // Projectiles vs enemies
+        this.projectiles.forEach((projectile, pIndex) => {
+            if (projectile.owner === 'player') {
+                this.enemies.forEach((enemy, eIndex) => {
+                    if (projectile.checkCollision(enemy)) {
+                        this.hitEnemy(enemy, projectile.damage);
+                        this.projectiles.splice(pIndex, 1);
+                        this.createHitEffect(enemy.x, enemy.y);
+                    }
+                });
+            }
+        });
+        
+        // Player vs enemies
+        this.enemies.forEach(enemy => {
+            if (this.player.checkCollision(enemy)) {
                 this.player.takeDamage(10);
-                this.uiManager.updateHealth(this.player.health);
-                
-                if (this.player.health <= 0) {
-                    this.gameOver();
+                this.createHitEffect(this.player.x, this.player.y);
+            }
+        });
+    }
+
+    collectItem(collectible) {
+        // Trigger data stream event
+        this.dataStreamVisualizer.addEvent({
+            type: 'collect',
+            data: collectible.type,
+            timestamp: Date.now(),
+            position: { x: collectible.x, y: collectible.y }
+        });
+        
+        // Apply collectible effect
+        switch (collectible.type) {
+            case 'data':
+                this.gameState.score += 100;
+                this.gameState.dataCollected++;
+                break;
+            case 'energy':
+                this.player.energy = Math.min(this.player.maxEnergy, this.player.energy + 25);
+                break;
+            case 'health':
+                this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
+                break;
+        }
+        
+        this.createCollectEffect(collectible.x, collectible.y, collectible.type);
+    }
+
+    hitEnemy(enemy, damage) {
+        enemy.takeDamage(damage);
+        
+        // Trigger data stream event
+        this.dataStreamVisualizer.addEvent({
+            type: 'combat',
+            data: { damage, enemyType: enemy.type },
+            timestamp: Date.now(),
+            position: { x: enemy.x, y: enemy.y }
+        });
+        
+        if (enemy.health <= 0) {
+            this.gameState.score += 50;
+            this.gameState.enemiesDefeated++;
+        }
+    }
+
+    spawnNewEntities() {
+        // Spawn new enemies occasionally
+        if (Math.random() < this.settings.enemySpawnRate && this.enemies.length < this.settings.maxEnemies) {
+            const spawnX = this.camera.x + this.width + 100;
+            const spawnY = this.height - 100;
+            const enemy = new Enemy(spawnX, spawnY, 'patrol');
+            enemy.init();
+            this.enemies.push(enemy);
+        }
+        
+        // Spawn new collectibles occasionally
+        if (Math.random() < this.settings.collectibleSpawnRate && this.collectibles.length < this.settings.maxCollectibles) {
+            const spawnX = this.camera.x + this.width + 50;
+            const spawnY = Math.random() * (this.height - 200) + 100;
+            const types = ['data', 'energy', 'health'];
+            const type = types[Math.floor(Math.random() * types.length)];
+            const collectible = new Collectible(spawnX, spawnY, type);
+            this.collectibles.push(collectible);
+        }
+    }
+
+    createHitEffect(x, y) {
+        // Create hit particles
+        for (let i = 0; i < 8; i++) {
+            this.particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 200,
+                vy: (Math.random() - 0.5) * 200,
+                lifetime: 0.5,
+                maxLifetime: 0.5,
+                color: '#ff4444',
+                size: 3,
+                update: function(deltaTime) {
+                    this.x += this.vx * deltaTime;
+                    this.y += this.vy * deltaTime;
+                    this.lifetime -= deltaTime;
+                    this.size *= 0.98;
                 }
-            }
+            });
         }
+    }
+
+    createCollectEffect(x, y, type) {
+        const colors = {
+            data: '#00aaff',
+            energy: '#ffaa00',
+            health: '#00ff44'
+        };
         
-        // Check projectile collisions
-        for (let i = this.projectiles.length - 1; i >= 0; i--) {
-            const projectile = this.projectiles[i];
-            const projectilePos = projectile.getPosition();
-            
-            // Check against enemies
-            for (let j = this.enemies.length - 1; j >= 0; j--) {
-                const enemy = this.enemies[j];
-                const distance = projectilePos.distanceTo(enemy.getPosition());
-                
-                if (distance < projectile.getRadius() + enemy.getRadius()) {
-                    // Hit enemy
-                    enemy.takeDamage(projectile.damage);
-                    
-                    // Remove projectile
-                    projectile.destroy();
-                    this.scene.remove(projectile.mesh);
-                    this.projectiles.splice(i, 1);
-                    
-                    break;
+        // Create collect particles
+        for (let i = 0; i < 12; i++) {
+            this.particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 150,
+                vy: (Math.random() - 0.5) * 150,
+                lifetime: 1.0,
+                maxLifetime: 1.0,
+                color: colors[type] || '#ffffff',
+                size: 4,
+                update: function(deltaTime) {
+                    this.x += this.vx * deltaTime;
+                    this.y += this.vy * deltaTime;
+                    this.lifetime -= deltaTime;
+                    this.size *= 0.99;
                 }
-            }
-        }
-    }
-
-    collectPowerUp(powerUp, index) {
-        // Apply power-up effect
-        powerUp.applyEffect(this.player);
-        
-        // Remove from scene
-        powerUp.destroy();
-        this.scene.remove(powerUp.mesh);
-        this.powerUps.splice(index, 1);
-        
-        // Notify blockchain
-        this.somniaConnector.collectPowerUp(powerUp.id);
-        
-        // Update UI
-        this.uiManager.showNotification(`Collected ${powerUp.type}!`, 'success');
-    }
-
-    createWeaponEffect(data) {
-        // Create visual effect for weapon fire
-        const projectile = new Projectile(this.scene);
-        projectile.init();
-        projectile.setPosition(data.targetX, data.targetY, data.targetZ);
-        this.projectiles.push(projectile);
-    }
-
-    updateBlockchainPosition() {
-        // Throttle position updates to blockchain
-        if (!this.player || !this.lastPositionUpdate) {
-            this.lastPositionUpdate = Date.now();
-            return;
-        }
-        
-        const now = Date.now();
-        if (now - this.lastPositionUpdate > 500) { // Update every 500ms
-            const pos = this.player.getPosition();
-            this.somniaConnector.updatePlayerPosition(pos.x, pos.y, pos.z);
-            this.lastPositionUpdate = now;
-        }
-    }
-
-    updateFPS(currentTime) {
-        this.frameCount++;
-        
-        if (currentTime - this.lastFPSUpdate >= 1000) {
-            this.fps = this.frameCount;
-            this.frameCount = 0;
-            this.lastFPSUpdate = currentTime;
-            
-            // Log FPS for debugging
-            if (this.fps < 30) {
-                console.warn(`⚠️ Low FPS: ${this.fps}`);
-            }
+            });
         }
     }
 
     render() {
-        this.renderer.render(this.scene, this.camera);
-    }
-
-    handleResize() {
-        if (!this.camera || !this.renderer) return;
+        // Clear canvas with gradient background
+        this.ctx.fillStyle = 'linear-gradient(180deg, #001122 0%, #003366 100%)';
+        this.ctx.fillRect(0, 0, this.width, this.height);
         
-        this.camera.aspect = window.innerWidth / window.innerHeight;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-
-    pause() {
-        this.isPaused = true;
-        console.log('⏸️ Game paused');
-    }
-
-    resume() {
-        this.isPaused = false;
-        this.lastTime = performance.now();
-        console.log('▶️ Game resumed');
-    }
-
-    gameOver() {
-        console.log('💀 Game Over!');
-        this.uiManager.showNotification('Game Over!', 'error', 5000);
+        // Set camera transform for world rendering
+        this.ctx.save();
+        this.ctx.translate(-this.camera.x, -this.camera.y);
         
-        // Reset game state
-        setTimeout(() => {
-            this.resetGame();
-        }, 3000);
-    }
-
-    resetGame() {
-        // Reset player
-        if (this.player) {
-            this.player.reset();
-        }
+        // Render level (platforms, collectibles, obstacles)
+        this.levelManager.render(this.ctx, this.camera);
         
-        // Clear entities
-        this.clearEntities();
-        
-        // Reset game state
-        this.gameState.reset();
-        
-        console.log('🔄 Game reset');
-    }
-
-    clearEntities() {
-        // Clear enemies
+        // Render enemies
         this.enemies.forEach(enemy => {
-            enemy.destroy();
-            this.scene.remove(enemy.mesh);
+            enemy.render(this.ctx, this.camera);
         });
-        this.enemies = [];
         
-        // Clear power-ups
-        this.powerUps.forEach(powerUp => {
-            powerUp.destroy();
-            this.scene.remove(powerUp.mesh);
-        });
-        this.powerUps = [];
+        // Render player
+        if (this.player) {
+            this.player.render(this.ctx, this.camera);
+        }
         
-        // Clear projectiles
+        // Render projectiles
         this.projectiles.forEach(projectile => {
-            projectile.destroy();
-            this.scene.remove(projectile.mesh);
+            projectile.render(this.ctx, this.camera);
         });
-        this.projectiles = [];
+        
+        // Render particles
+        this.particles.forEach(particle => {
+            particle.render(this.ctx, this.camera);
+        });
+        
+        // Restore camera transform
+        this.ctx.restore();
+        
+        // Render data stream visualization (screen space)
+        this.dataStreamVisualizer.render(this.ctx);
+        
+        // Render UI (screen space)
+        this.gameUI.render();
     }
 
-    stop() {
-        this.isRunning = false;
+    renderUI() {
+        // Health bar
+        this.ctx.fillStyle = '#ff4444';
+        this.ctx.fillRect(20, 20, 200, 20);
+        this.ctx.fillStyle = '#44ff44';
+        this.ctx.fillRect(20, 20, (this.player.health / this.player.maxHealth) * 200, 20);
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.strokeRect(20, 20, 200, 20);
         
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
+        // Energy bar
+        this.ctx.fillStyle = '#444444';
+        this.ctx.fillRect(20, 50, 200, 15);
+        this.ctx.fillStyle = '#00aaff';
+        this.ctx.fillRect(20, 50, (this.player.energy / this.player.maxEnergy) * 200, 15);
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.strokeRect(20, 50, 200, 15);
+        
+        // Score and stats
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '16px Arial';
+        this.ctx.fillText(`Score: ${this.gameState.score}`, 20, 90);
+        this.ctx.fillText(`Data Collected: ${this.gameState.dataCollected}`, 20, 110);
+        this.ctx.fillText(`FPS: ${this.fps}`, this.width - 80, 30);
+        
+        // Blockchain connection status
+        const connectionStatus = this.somniaConnector.isConnected ? 'Connected' : 'Disconnected';
+        this.ctx.fillStyle = this.somniaConnector.isConnected ? '#44ff44' : '#ff4444';
+        this.ctx.fillText(`Blockchain: ${connectionStatus}`, 20, 130);
+    }
+
+    updateFPS(currentTime) {
+        this.frameCount++;
+        if (currentTime - this.lastFPSUpdate >= 1000) {
+            this.fps = Math.round((this.frameCount * 1000) / (currentTime - this.lastFPSUpdate));
+            this.frameCount = 0;
+            this.lastFPSUpdate = currentTime;
         }
-        
-        // Clean up
-        this.clearEntities();
-        
-        if (this.inputManager) {
-            this.inputManager.destroy();
-        }
-        
-        console.log('🛑 Game stopped');
+    }
+
+    // Public methods for external control
+    addProjectile(projectile) {
+        this.projectiles.push(projectile);
+    }
+
+    getPlayerPosition() {
+        return { x: this.player.x, y: this.player.y };
+    }
+
+    getCameraPosition() {
+        return { x: this.camera.x, y: this.camera.y };
+    }
+
+    resize(width, height) {
+        this.width = width;
+        this.height = height;
+        this.canvas.width = width;
+        this.canvas.height = height;
     }
 }

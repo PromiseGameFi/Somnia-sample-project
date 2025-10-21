@@ -9,9 +9,21 @@ export class SomniaConnector {
         this.playerAddress = null;
         this.eventListeners = new Map();
         
+        // Development mode - set to true for demo without MetaMask
+        const devModeEnv = import.meta.env.VITE_DEV_MODE;
+        // Temporarily hardcode to true for debugging
+        this.isDevelopmentMode = true;
+        this.mockPlayerAddress = '0x742d35Cc6634C0532925a3b8D4C9db96590c4C5d';
+        
+        // Debug logging
+        console.log('🔧 SomniaConnector Debug Info:');
+        console.log('   VITE_DEV_MODE (raw):', devModeEnv);
+        console.log('   VITE_DEV_MODE (type):', typeof devModeEnv);
+        console.log('   isDevelopmentMode (hardcoded):', this.isDevelopmentMode);
+        
         // Somnia network configuration
         this.networkConfig = {
-            chainId: '0x7A69', // Somnia testnet chain ID (example)
+            chainId: '0xc488', // Somnia Testnet chain ID (50312)
             chainName: 'Somnia Testnet',
             rpcUrls: [import.meta.env.VITE_SOMNIA_RPC_URL || 'https://dream-rpc.somnia.network'],
             nativeCurrency: {
@@ -42,7 +54,41 @@ export class SomniaConnector {
     async connect() {
         try {
             console.log('🔗 Connecting to Somnia network...');
+            console.log('🔧 Development mode check:', this.isDevelopmentMode);
 
+            if (this.isDevelopmentMode) {
+                // Development mode - simulate connection without MetaMask
+                console.log('🚀 Running in development mode - simulating blockchain connection');
+                
+                try {
+                    // Simulate connection delay
+                    console.log('⏳ Simulating connection delay...');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    console.log('🔧 Setting player address...');
+                    this.playerAddress = this.mockPlayerAddress;
+                    this.isConnected = true;
+                    
+                    console.log('🔧 Setting up mock event listeners...');
+                    // Set up mock event listeners
+                    this.setupMockEventListeners();
+                    
+                    console.log('✅ Connected to Somnia network successfully! (Development Mode)');
+                    console.log('👤 Player address:', this.playerAddress);
+                    
+                    console.log('🔧 Emitting connected event...');
+                    // Emit connected event
+                    this.emitConnected();
+                    
+                    console.log('🔧 Development mode connection complete!');
+                    return true;
+                } catch (devError) {
+                    console.error('❌ Error in development mode connection:', devError);
+                    throw devError;
+                }
+            }
+
+            // Production mode - require MetaMask
             // Check if MetaMask is available
             if (typeof window.ethereum === 'undefined') {
                 throw new Error('MetaMask is not installed. Please install MetaMask to continue.');
@@ -60,7 +106,8 @@ export class SomniaConnector {
 
             // Check if we're on the correct network
             const network = await this.provider.getNetwork();
-            if (network.chainId.toString() !== this.networkConfig.chainId) {
+            const expectedChainId = parseInt(this.networkConfig.chainId, 16);
+            if (Number(network.chainId) !== expectedChainId) {
                 await this.switchToSomniaNetwork();
             }
 
@@ -77,6 +124,9 @@ export class SomniaConnector {
             this.isConnected = true;
             console.log('✅ Connected to Somnia network successfully!');
             console.log('👤 Player address:', this.playerAddress);
+
+            // Emit connected event
+            this.emitConnected();
 
             return true;
 
@@ -127,10 +177,43 @@ export class SomniaConnector {
             this.emit('powerUpCollected', { player, powerUpId, timestamp });
         });
 
-        // Listen for score updates
+        // Listen for score update events
         this.gameContract.on('ScoreUpdated', (player, newScore, timestamp) => {
             this.emit('scoreUpdated', { player, newScore, timestamp });
         });
+    }
+
+    setupMockEventListeners() {
+        // In development mode, we don't have real contract events
+        // but we can simulate them when game actions occur
+        console.log('📡 Mock event listeners set up for development mode');
+        
+        // Simulate periodic blockchain activity for demo purposes
+        this.startMockBlockchainActivity();
+    }
+
+    startMockBlockchainActivity() {
+        // Simulate random blockchain events for visual demonstration
+        setInterval(() => {
+            if (!this.isConnected) return;
+            
+            const events = [
+                'transactionConfirmed',
+                'playerAction',
+                'enemyAction',
+                'collectiblePickup'
+            ];
+            
+            const randomEvent = events[Math.floor(Math.random() * events.length)];
+            const mockData = {
+                player: this.playerAddress,
+                timestamp: Date.now(),
+                blockNumber: Math.floor(Math.random() * 1000000) + 1000000,
+                gasUsed: Math.floor(Math.random() * 50000) + 21000
+            };
+            
+            this.emit(randomEvent, mockData);
+        }, 3000 + Math.random() * 2000); // Random interval between 3-5 seconds
     }
 
     // Event emitter methods
@@ -149,8 +232,14 @@ export class SomniaConnector {
 
     // Game interaction methods
     async updatePlayerPosition(x, y, z) {
-        if (!this.isConnected || !this.gameContract) {
+        if (!this.isConnected) {
             console.warn('⚠️ Not connected to Somnia network');
+            return;
+        }
+
+        // Skip gameContract check in development mode
+        if (!this.isDevelopmentMode && !this.gameContract) {
+            console.warn('⚠️ Game contract not available');
             return;
         }
 
@@ -177,8 +266,14 @@ export class SomniaConnector {
     }
 
     async fireWeapon(targetX, targetY, targetZ) {
-        if (!this.isConnected || !this.gameContract) {
+        if (!this.isConnected) {
             console.warn('⚠️ Not connected to Somnia network');
+            return;
+        }
+
+        // Skip gameContract check in development mode
+        if (!this.isDevelopmentMode && !this.gameContract) {
+            console.warn('⚠️ Game contract not available');
             return;
         }
 
@@ -202,8 +297,14 @@ export class SomniaConnector {
     }
 
     async collectPowerUp(powerUpId) {
-        if (!this.isConnected || !this.gameContract) {
+        if (!this.isConnected) {
             console.warn('⚠️ Not connected to Somnia network');
+            return;
+        }
+
+        // Skip gameContract check in development mode
+        if (!this.isDevelopmentMode && !this.gameContract) {
+            console.warn('⚠️ Game contract not available');
             return;
         }
 
@@ -264,6 +365,47 @@ export class SomniaConnector {
         return mockPlayers.sort((a, b) => b.score - a.score);
     }
 
+    // Event emission methods for DataStreamVisualizer
+    emitPlayerAction(data) {
+        this.emit('playerAction', data);
+    }
+
+    emitPlayerShoot(data) {
+        this.emit('playerShoot', data);
+    }
+
+    emitPlayerDamage(data) {
+        this.emit('playerDamage', data);
+    }
+
+    emitEnemyAction(data) {
+        this.emit('enemyAction', data);
+    }
+
+    emitCollectiblePickup(data) {
+        this.emit('collectiblePickup', data);
+    }
+
+    emitLevelComplete(data) {
+        this.emit('levelComplete', data);
+    }
+
+    emitTransactionConfirmed(data) {
+        this.emit('transactionConfirmed', data);
+    }
+
+    emitError(error) {
+        this.emit('error', error);
+    }
+
+    emitConnected() {
+        this.emit('connected');
+    }
+
+    emitDisconnected() {
+        this.emit('disconnected');
+    }
+
     disconnect() {
         if (this.gameContract) {
             this.gameContract.removeAllListeners();
@@ -274,6 +416,9 @@ export class SomniaConnector {
         this.gameContract = null;
         this.isConnected = false;
         this.playerAddress = null;
+        
+        // Emit disconnected event before clearing listeners
+        this.emitDisconnected();
         this.eventListeners.clear();
         
         console.log('🔌 Disconnected from Somnia network');

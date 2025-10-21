@@ -1,15 +1,15 @@
-# Somnia Space Raiders 🚀
+# Somnia Data Stream Platformer 🎮
 
-A real-time multiplayer space shooter game built with **Somnia Data Streams** to demonstrate the power of reactive blockchain programming. This project showcases how to build engaging, real-time applications that leverage blockchain technology for enhanced gameplay experiences.
+A real-time 2D platformer game built with **Somnia Data Streams** to demonstrate the power of reactive blockchain programming. This project showcases how to build engaging, real-time applications that leverage blockchain technology for enhanced gameplay experiences.
 
 ## 🎮 Game Overview
 
-**Somnia Space Raiders** is an action-packed 3D space shooter where players:
-- Navigate through space in real-time
-- Battle AI enemies with various weapon systems
-- Collect power-ups to enhance abilities
-- Compete on live leaderboards
-- Earn achievements tracked on-chain
+**Somnia Data Stream Platformer** is an action-packed 2D platformer where players:
+- Navigate through platform-based levels
+- Battle AI enemies with various attack patterns
+- Collect power-ups and items
+- Experience real-time blockchain data visualization
+- See live blockchain events as visual effects
 
 ## 🌟 Key Features
 
@@ -20,17 +20,23 @@ A real-time multiplayer space shooter game built with **Somnia Data Streams** to
 - **Multiplayer Ready**: Built for real-time multiplayer experiences
 
 ### Advanced Game Mechanics
-- **3D Graphics**: Powered by Three.js for immersive visuals
-- **Physics Engine**: Realistic movement and collision detection
-- **AI Enemies**: Multiple enemy types with unique behaviors
-- **Power-up System**: Various enhancements for weapons and abilities
-- **Progressive Difficulty**: Dynamic scaling based on player performance
+- **2D Canvas Graphics**: Smooth 2D rendering with visual effects
+- **Platformer Physics**: Jump mechanics and collision detection
+- **AI Enemies**: Multiple enemy types with patrol and attack patterns
+- **Data Stream Visualization**: Real-time blockchain events as particle effects
+- **Level Progression**: Platform-based levels with increasing difficulty
+
+### Development Mode
+- **Demo Mode**: Runs without MetaMask for easy demonstration
+- **Mock Blockchain**: Simulates blockchain events for development
+- **Visual Feedback**: Clear indicators of blockchain activity
+- **Easy Setup**: No wallet connection required for testing
 
 ## 🛠 Technology Stack
 
-- **Frontend**: Vanilla JavaScript, Three.js, Vite
+- **Frontend**: Vanilla JavaScript, HTML5 Canvas, Vite
 - **Blockchain**: Somnia Network, Ethers.js
-- **Physics**: Cannon.js
+- **Game Engine**: Custom 2D engine
 - **Build Tool**: Vite
 - **Styling**: Modern CSS with animations
 
@@ -66,25 +72,35 @@ A real-time multiplayer space shooter game built with **Somnia Data Streams** to
 
 Create a `.env` file in the root directory:
 ```env
-VITE_SOMNIA_RPC_URL=https://your-somnia-rpc-url
-VITE_CONTRACT_ADDRESS=0xYourContractAddress
+# Development mode (set to 'false' to require MetaMask)
+VITE_DEV_MODE=true
+
+# Somnia RPC URL
+VITE_SOMNIA_RPC_URL=https://dream-rpc.somnia.network
+
+# Optional: Custom contract address
+VITE_GAME_CONTRACT_ADDRESS=0xYourContractAddress
 ```
+
+**Development Mode Options:**
+- `VITE_DEV_MODE=true` - Demo mode without MetaMask (default)
+- `VITE_DEV_MODE=false` - Production mode requiring wallet connection
 
 ## 🎯 How to Play
 
-1. **Connect Wallet**: Click "Connect Wallet" to link your MetaMask
-2. **Start Game**: Press "Start Game" to begin your space adventure
-3. **Controls**:
-   - **WASD**: Move your ship
-   - **Mouse**: Aim and look around
-   - **Left Click**: Fire primary weapon
-   - **Space**: Jump/Boost
-   - **R**: Reload weapon
-4. **Objectives**:
-   - Destroy enemies to earn points
-   - Collect power-ups for advantages
-   - Survive as long as possible
-   - Climb the leaderboard
+1. **Launch Game**: Click "Launch Game" to start (no wallet required in demo mode)
+2. **Controls**:
+   - **A/D or ←/→**: Move left/right
+   - **W or ↑ or Space**: Jump
+   - **Mouse Click**: Shoot projectiles
+   - **P**: Pause/Resume game
+   - **R**: Restart game
+3. **Objectives**:
+   - Navigate through platform levels
+   - Defeat enemies to earn points
+   - Collect items and power-ups
+   - Watch blockchain data streams in real-time
+   - Complete levels to progress
 
 ## 📁 Project Structure
 

@@ -1,698 +1,638 @@
-import * as THREE from 'three';
+import { Projectile } from './Projectile.js';
 
 export class Enemy {
-    constructor(scene) {
-        this.scene = scene;
+    constructor(x, y, type = 'basic', somniaConnector) {
+        this.somniaConnector = somniaConnector;
         
-        // Enemy properties
-        this.health = 50;
-        this.maxHealth = 50;
-        this.speed = 8;
-        this.damage = 15;
-        this.radius = 1.2;
-        this.attackRange = 20;
-        this.detectionRange = 30;
+        // Position and physics
+        this.x = x;
+        this.y = y;
+        this.width = 20;
+        this.height = 20;
+        this.vx = 0;
+        this.vy = 0;
+        this.onGround = false;
+        this.facing = 1; // 1 for right, -1 for left
         
-        // Position and movement
-        this.position = new THREE.Vector3();
-        this.rotation = new THREE.Euler();
-        this.velocity = new THREE.Vector3();
-        this.targetPosition = new THREE.Vector3();
+        // Enemy type and properties
+        this.type = type;
+        this.setupEnemyType();
         
         // AI state
-        this.state = 'patrol'; // patrol, chase, attack, dead
-        this.target = null;
-        this.lastAttackTime = 0;
-        this.attackCooldown = 2; // seconds
-        this.patrolCenter = new THREE.Vector3();
-        this.patrolRadius = 15;
-        this.patrolAngle = Math.random() * Math.PI * 2;
+        this.state = 'patrol';
+        this.stateTimer = 0;
+        this.patrolStartX = x;
+        this.patrolRange = 100;
+        this.detectionRange = 80;
+        this.attackRange = 60;
         
-        // 3D objects
-        this.mesh = null;
-        this.weaponMesh = null;
-        this.healthBar = null;
+        // Combat
+        this.weapon = {
+            damage: 15,
+            fireRate: 1.0,
+            lastFireTime: 0,
+            projectileSpeed: 300
+        };
+        
+        // Animation
+        this.animationFrame = 0;
+        this.animationSpeed = 0.15;
         
         // Visual effects
-        this.trailPoints = [];
-        this.maxTrailPoints = 10;
+        this.hitFlash = 0;
+        this.deathAnimation = 0;
         this.isDead = false;
-        this.deathTime = 0;
         
-        // Enemy type
-        this.type = this.selectRandomType();
-        this.applyTypeProperties();
-        
-        console.log(`👾 Enemy created: ${this.type}`);
+        console.log(`🤖 2D Enemy created: ${type} at (${x}, ${y})`);
     }
 
-    selectRandomType() {
-        const types = ['scout', 'fighter', 'heavy', 'bomber'];
-        return types[Math.floor(Math.random() * types.length)];
-    }
-
-    applyTypeProperties() {
+    setupEnemyType() {
         switch (this.type) {
-            case 'scout':
-                this.health = 30;
-                this.maxHealth = 30;
-                this.speed = 12;
-                this.damage = 10;
-                this.radius = 0.8;
-                this.color = 0xff4444;
-                break;
-                
-            case 'fighter':
+            case 'basic':
                 this.health = 50;
                 this.maxHealth = 50;
-                this.speed = 8;
-                this.damage = 15;
-                this.radius = 1.2;
-                this.color = 0x44ff44;
+                this.speed = 60;
+                this.color = '#ff4444';
+                this.weapon.damage = 15;
+                this.weapon.fireRate = 1.5;
+                break;
+                
+            case 'fast':
+                this.health = 30;
+                this.maxHealth = 30;
+                this.speed = 120;
+                this.color = '#ff8844';
+                this.weapon.damage = 10;
+                this.weapon.fireRate = 1.0;
+                this.patrolRange = 150;
                 break;
                 
             case 'heavy':
                 this.health = 100;
                 this.maxHealth = 100;
-                this.speed = 5;
-                this.damage = 25;
-                this.radius = 1.8;
-                this.color = 0x4444ff;
+                this.speed = 30;
+                this.color = '#8844ff';
+                this.weapon.damage = 25;
+                this.weapon.fireRate = 2.0;
+                this.width = 24;
+                this.height = 24;
+                this.detectionRange = 100;
                 break;
                 
-            case 'bomber':
-                this.health = 75;
-                this.maxHealth = 75;
-                this.speed = 6;
-                this.damage = 30;
-                this.radius = 1.5;
-                this.attackRange = 25;
-                this.color = 0xff44ff;
+            case 'sniper':
+                this.health = 40;
+                this.maxHealth = 40;
+                this.speed = 40;
+                this.color = '#44ff44';
+                this.weapon.damage = 30;
+                this.weapon.fireRate = 3.0;
+                this.detectionRange = 120;
+                this.attackRange = 100;
+                this.weapon.projectileSpeed = 600;
                 break;
         }
     }
 
-    init() {
-        this.createEnemyMesh();
-        this.createWeaponMesh();
-        this.createHealthBar();
-        this.setRandomPatrolCenter();
-        
-        console.log(`✅ Enemy ${this.type} initialized`);
-    }
-
-    createEnemyMesh() {
-        // Create different geometries based on type
-        let geometry;
-        
-        switch (this.type) {
-            case 'scout':
-                geometry = new THREE.TetrahedronGeometry(this.radius);
-                break;
-            case 'fighter':
-                geometry = new THREE.OctahedronGeometry(this.radius);
-                break;
-            case 'heavy':
-                geometry = new THREE.BoxGeometry(this.radius * 2, this.radius, this.radius * 2);
-                break;
-            case 'bomber':
-                geometry = new THREE.SphereGeometry(this.radius, 8, 6);
-                break;
-            default:
-                geometry = new THREE.OctahedronGeometry(this.radius);
-        }
-        
-        const material = new THREE.MeshLambertMaterial({
-            color: this.color,
-            emissive: new THREE.Color(this.color).multiplyScalar(0.2)
-        });
-        
-        this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.castShadow = true;
-        this.mesh.receiveShadow = true;
-        
-        // Add glow effect
-        const glowGeometry = geometry.clone();
-        glowGeometry.scale(1.2, 1.2, 1.2);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: this.color,
-            transparent: true,
-            opacity: 0.2
-        });
-        const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-        this.mesh.add(glowMesh);
-        
-        // Add detail elements based on type
-        this.addTypeSpecificDetails();
-        
-        this.scene.add(this.mesh);
-    }
-
-    addTypeSpecificDetails() {
-        switch (this.type) {
-            case 'scout':
-                // Add antenna
-                const antennaGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 4);
-                const antennaMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-                const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
-                antenna.position.y = this.radius + 0.5;
-                this.mesh.add(antenna);
-                break;
-                
-            case 'heavy':
-                // Add armor plates
-                const plateGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.3);
-                const plateMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
-                
-                for (let i = 0; i < 4; i++) {
-                    const plate = new THREE.Mesh(plateGeometry, plateMaterial);
-                    const angle = (i / 4) * Math.PI * 2;
-                    plate.position.x = Math.cos(angle) * this.radius * 0.8;
-                    plate.position.z = Math.sin(angle) * this.radius * 0.8;
-                    this.mesh.add(plate);
-                }
-                break;
-                
-            case 'bomber':
-                // Add bomb bay
-                const bayGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 6);
-                const bayMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
-                const bay = new THREE.Mesh(bayGeometry, bayMaterial);
-                bay.position.y = -this.radius * 0.5;
-                this.mesh.add(bay);
-                break;
-        }
-    }
-
-    createWeaponMesh() {
-        // Create weapon based on type
-        let weaponGeometry;
-        
-        switch (this.type) {
-            case 'scout':
-                weaponGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 4);
-                break;
-            case 'bomber':
-                weaponGeometry = new THREE.SphereGeometry(0.2, 6, 4);
-                break;
-            default:
-                weaponGeometry = new THREE.BoxGeometry(0.1, 0.6, 0.1);
-        }
-        
-        const weaponMaterial = new THREE.MeshLambertMaterial({
-            color: 0x888888
-        });
-        
-        this.weaponMesh = new THREE.Mesh(weaponGeometry, weaponMaterial);
-        this.weaponMesh.position.set(0, this.radius + 0.3, 0);
-        this.mesh.add(this.weaponMesh);
-    }
-
-    createHealthBar() {
-        // Create health bar above enemy
-        const barWidth = 2;
-        const barHeight = 0.2;
-        
-        // Background
-        const bgGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-        const bgMaterial = new THREE.MeshBasicMaterial({ color: 0x333333 });
-        const background = new THREE.Mesh(bgGeometry, bgMaterial);
-        
-        // Health bar
-        const healthGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-        const healthMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-        const healthBar = new THREE.Mesh(healthGeometry, healthMaterial);
-        
-        // Group them
-        this.healthBar = new THREE.Group();
-        this.healthBar.add(background);
-        this.healthBar.add(healthBar);
-        this.healthBar.position.y = this.radius + 1;
-        
-        // Make health bar always face camera
-        this.healthBar.userData = { healthMesh: healthBar, maxWidth: barWidth };
-        
-        this.mesh.add(this.healthBar);
-    }
-
-    setRandomPatrolCenter() {
-        // Set patrol center within arena bounds
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 30;
-        
-        this.patrolCenter.set(
-            Math.cos(angle) * distance,
-            Math.random() * 5 + 3,
-            Math.sin(angle) * distance
-        );
-    }
-
-    update(deltaTime, player) {
+    update(deltaTime, player, platforms, enemies) {
         if (this.isDead) {
-            this.updateDeath(deltaTime);
+            this.updateDeathAnimation(deltaTime);
             return;
         }
         
-        // Update AI
+        // Update AI state
         this.updateAI(deltaTime, player);
         
-        // Update movement
-        this.updateMovement(deltaTime);
+        // Apply physics
+        this.applyPhysics(deltaTime);
         
-        // Update visual effects
-        this.updateVisualEffects(deltaTime);
+        // Check platform collisions
+        this.checkPlatformCollisions(platforms);
         
-        // Update mesh position
-        this.updateMeshPosition();
+        // Update animation
+        this.updateAnimation(deltaTime);
         
-        // Update health bar
-        this.updateHealthBar();
+        // Update effects
+        this.updateEffects(deltaTime);
+        
+        // Send enemy data to blockchain (throttled)
+        this.updateBlockchainData();
     }
 
     updateAI(deltaTime, player) {
-        if (!player) {
-            this.state = 'patrol';
-            return;
-        }
+        this.stateTimer += deltaTime;
         
-        const playerPos = player.getPosition();
-        const distanceToPlayer = this.position.distanceTo(playerPos);
+        const distanceToPlayer = Math.sqrt(
+            Math.pow(player.x - this.x, 2) + Math.pow(player.y - this.y, 2)
+        );
         
-        // State machine
+        // State transitions
         switch (this.state) {
             case 'patrol':
-                this.patrol(deltaTime);
+                this.patrolBehavior(deltaTime);
                 
-                // Check if player is in detection range
-                if (distanceToPlayer <= this.detectionRange) {
+                // Check if player is detected
+                if (distanceToPlayer < this.detectionRange) {
                     this.state = 'chase';
-                    this.target = player;
-                    console.log(`👾 ${this.type} detected player!`);
+                    this.stateTimer = 0;
                 }
                 break;
                 
             case 'chase':
-                this.chase(deltaTime, playerPos);
+                this.chaseBehavior(deltaTime, player);
                 
                 // Check if player is in attack range
-                if (distanceToPlayer <= this.attackRange) {
+                if (distanceToPlayer < this.attackRange) {
                     this.state = 'attack';
+                    this.stateTimer = 0;
                 }
                 
-                // Check if player escaped
+                // Lose player if too far
                 if (distanceToPlayer > this.detectionRange * 1.5) {
-                    this.state = 'patrol';
-                    this.target = null;
+                    this.state = 'return';
+                    this.stateTimer = 0;
                 }
                 break;
                 
             case 'attack':
-                this.attack(deltaTime, player);
+                this.attackBehavior(deltaTime, player);
                 
-                // Check if player moved out of attack range
-                if (distanceToPlayer > this.attackRange) {
+                // Return to chase if player moves away
+                if (distanceToPlayer > this.attackRange * 1.2) {
                     this.state = 'chase';
+                    this.stateTimer = 0;
+                }
+                break;
+                
+            case 'return':
+                this.returnBehavior(deltaTime);
+                
+                // Check if back at patrol start
+                if (Math.abs(this.x - this.patrolStartX) < 10) {
+                    this.state = 'patrol';
+                    this.stateTimer = 0;
+                }
+                
+                // Re-detect player if close
+                if (distanceToPlayer < this.detectionRange * 0.8) {
+                    this.state = 'chase';
+                    this.stateTimer = 0;
                 }
                 break;
         }
     }
 
-    patrol(deltaTime) {
-        // Simple patrol behavior - circle around patrol center
-        this.patrolAngle += deltaTime * 0.5;
+    patrolBehavior(deltaTime) {
+        // Simple back and forth patrol
+        const distanceFromStart = this.x - this.patrolStartX;
         
-        this.targetPosition.set(
-            this.patrolCenter.x + Math.cos(this.patrolAngle) * this.patrolRadius,
-            this.patrolCenter.y,
-            this.patrolCenter.z + Math.sin(this.patrolAngle) * this.patrolRadius
-        );
+        if (distanceFromStart > this.patrolRange) {
+            this.facing = -1;
+        } else if (distanceFromStart < -this.patrolRange) {
+            this.facing = 1;
+        }
+        
+        // Change direction occasionally
+        if (this.stateTimer > 3 + Math.random() * 2) {
+            this.facing *= -1;
+            this.stateTimer = 0;
+        }
+        
+        this.vx = this.facing * this.speed * 0.5; // Slower patrol speed
     }
 
-    chase(deltaTime, playerPos) {
-        // Move towards player with some prediction
-        const direction = playerPos.clone().sub(this.position);
-        direction.normalize();
+    chaseBehavior(deltaTime, player) {
+        // Move towards player
+        if (player.x > this.x + this.width / 2) {
+            this.facing = 1;
+            this.vx = this.speed;
+        } else if (player.x < this.x + this.width / 2) {
+            this.facing = -1;
+            this.vx = -this.speed;
+        } else {
+            this.vx *= 0.8; // Slow down when close
+        }
         
-        // Add some randomness to make movement less predictable
-        direction.x += (Math.random() - 0.5) * 0.2;
-        direction.z += (Math.random() - 0.5) * 0.2;
-        direction.normalize();
-        
-        this.targetPosition.copy(this.position).add(direction.multiplyScalar(this.speed));
+        // Jump if player is above and close
+        if (player.y < this.y - 20 && Math.abs(player.x - this.x) < 40 && this.onGround) {
+            this.vy = -300; // Jump
+            this.onGround = false;
+        }
     }
 
-    attack(deltaTime, player) {
+    attackBehavior(deltaTime, player) {
+        // Stop moving and face player
+        this.vx *= 0.9;
+        
+        if (player.x > this.x + this.width / 2) {
+            this.facing = 1;
+        } else {
+            this.facing = -1;
+        }
+        
+        // Try to shoot
+        this.shoot(player);
+    }
+
+    returnBehavior(deltaTime) {
+        // Return to patrol start position
+        if (this.x > this.patrolStartX + 10) {
+            this.facing = -1;
+            this.vx = -this.speed * 0.7;
+        } else if (this.x < this.patrolStartX - 10) {
+            this.facing = 1;
+            this.vx = this.speed * 0.7;
+        } else {
+            this.vx *= 0.8;
+        }
+    }
+
+    shoot(player) {
         const currentTime = Date.now() / 1000;
         
-        // Face the player
-        const playerPos = player.getPosition();
-        const direction = playerPos.clone().sub(this.position);
-        this.rotation.y = Math.atan2(direction.x, direction.z);
-        
-        // Attack if cooldown is ready
-        if (currentTime - this.lastAttackTime >= this.attackCooldown) {
-            this.performAttack(player);
-            this.lastAttackTime = currentTime;
+        // Check fire rate
+        if (currentTime - this.weapon.lastFireTime < this.weapon.fireRate) {
+            return null;
         }
         
-        // Move slightly to maintain distance
-        if (this.position.distanceTo(playerPos) < this.attackRange * 0.7) {
-            // Move away
-            direction.normalize().multiplyScalar(-this.speed * 0.5);
-            this.targetPosition.copy(this.position).add(direction);
+        this.weapon.lastFireTime = currentTime;
+        
+        // Calculate direction to player
+        const dx = player.x + player.width / 2 - (this.x + this.width / 2);
+        const dy = player.y + player.height / 2 - (this.y + this.height / 2);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance === 0) return null;
+        
+        const dirX = dx / distance;
+        const dirY = dy / distance;
+        
+        // Create projectile
+        const projectile = new Projectile(
+            this.x + this.width / 2,
+            this.y + this.height / 2,
+            dirX * this.weapon.projectileSpeed,
+            dirY * this.weapon.projectileSpeed,
+            this.weapon.damage,
+            'enemy'
+        );
+        
+        // Send shooting event to blockchain
+        this.somniaConnector.emitEnemyAction({
+            action: 'shoot',
+            enemyType: this.type,
+            x: this.x,
+            y: this.y,
+            targetX: player.x,
+            targetY: player.y,
+            timestamp: Date.now()
+        });
+        
+        return projectile;
+    }
+
+    applyPhysics(deltaTime) {
+        // Apply gravity
+        if (!this.onGround) {
+            this.vy += 600 * deltaTime; // gravity
+        }
+        
+        // Update position
+        this.x += this.vx * deltaTime;
+        this.y += this.vy * deltaTime;
+        
+        // Terminal velocity
+        if (this.vy > 400) {
+            this.vy = 400;
         }
     }
 
-    performAttack(player) {
-        // Different attack patterns based on type
-        switch (this.type) {
-            case 'scout':
-                this.rapidFireAttack(player);
-                break;
-            case 'fighter':
-                this.standardAttack(player);
-                break;
-            case 'heavy':
-                this.heavyAttack(player);
-                break;
-            case 'bomber':
-                this.bombAttack(player);
-                break;
-        }
-    }
-
-    rapidFireAttack(player) {
-        // Scout fires multiple quick shots
-        for (let i = 0; i < 3; i++) {
-            setTimeout(() => {
-                this.fireProjectile(player);
-            }, i * 100);
-        }
-    }
-
-    standardAttack(player) {
-        // Fighter fires a single accurate shot
-        this.fireProjectile(player);
-    }
-
-    heavyAttack(player) {
-        // Heavy fires a powerful shot with splash damage
-        this.fireProjectile(player, 2); // Double damage
-    }
-
-    bombAttack(player) {
-        // Bomber drops an explosive
-        this.dropBomb(player);
-    }
-
-    fireProjectile(player, damageMultiplier = 1) {
-        const playerPos = player.getPosition();
-        const direction = playerPos.clone().sub(this.position);
-        direction.normalize();
+    checkPlatformCollisions(platforms) {
+        this.onGround = false;
         
-        // Create projectile effect
-        this.createProjectileEffect(direction);
-        
-        // Check if projectile would hit player (simplified)
-        const distance = this.position.distanceTo(playerPos);
-        const travelTime = distance / 30; // Projectile speed
-        
-        setTimeout(() => {
-            // Check if player is still in roughly the same position
-            const currentPlayerPos = player.getPosition();
-            const predictedPos = playerPos.clone().add(
-                currentPlayerPos.clone().sub(playerPos).multiplyScalar(travelTime)
-            );
-            
-            if (this.position.distanceTo(predictedPos) <= this.attackRange) {
-                const damage = this.damage * damageMultiplier;
-                const hit = player.takeDamage(damage);
+        for (const platform of platforms) {
+            // Check if enemy is colliding with platform
+            if (this.x + this.width > platform.x && 
+                this.x < platform.x + platform.width &&
+                this.y + this.height > platform.y && 
+                this.y < platform.y + platform.height) {
                 
-                if (hit) {
-                    console.log(`💥 ${this.type} hit player for ${damage} damage!`);
+                // Determine collision side
+                const overlapLeft = (this.x + this.width) - platform.x;
+                const overlapRight = (platform.x + platform.width) - this.x;
+                const overlapTop = (this.y + this.height) - platform.y;
+                const overlapBottom = (platform.y + platform.height) - this.y;
+                
+                const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+                
+                if (minOverlap === overlapTop && this.vy > 0) {
+                    // Landing on top of platform
+                    this.y = platform.y - this.height;
+                    this.vy = 0;
+                    this.onGround = true;
+                } else if (minOverlap === overlapBottom && this.vy < 0) {
+                    // Hitting platform from below
+                    this.y = platform.y + platform.height;
+                    this.vy = 0;
+                } else if (minOverlap === overlapLeft && this.vx > 0) {
+                    // Hitting platform from left
+                    this.x = platform.x - this.width;
+                    this.vx = 0;
+                    this.facing = -1; // Turn around
+                } else if (minOverlap === overlapRight && this.vx < 0) {
+                    // Hitting platform from right
+                    this.x = platform.x + platform.width;
+                    this.vx = 0;
+                    this.facing = 1; // Turn around
                 }
             }
-        }, travelTime * 1000);
-    }
-
-    dropBomb(player) {
-        // Create bomb effect at player's position
-        const playerPos = player.getPosition();
-        
-        setTimeout(() => {
-            // Explosion effect
-            this.createExplosionEffect(playerPos);
-            
-            // Check if player is in blast radius
-            const currentPlayerPos = player.getPosition();
-            const blastRadius = 5;
-            
-            if (currentPlayerPos.distanceTo(playerPos) <= blastRadius) {
-                const damage = this.damage;
-                player.takeDamage(damage);
-                console.log(`💣 ${this.type} bombed player for ${damage} damage!`);
-            }
-        }, 1000); // 1 second delay
-    }
-
-    createProjectileEffect(direction) {
-        // Create visual projectile
-        const geometry = new THREE.SphereGeometry(0.1);
-        const material = new THREE.MeshBasicMaterial({ 
-            color: this.color,
-            emissive: this.color
-        });
-        const projectile = new THREE.Mesh(geometry, material);
-        
-        projectile.position.copy(this.position);
-        this.scene.add(projectile);
-        
-        // Animate projectile
-        const speed = 30;
-        const startTime = Date.now();
-        
-        const animateProjectile = () => {
-            const elapsed = (Date.now() - startTime) / 1000;
-            const distance = speed * elapsed;
-            
-            projectile.position.copy(this.position).add(
-                direction.clone().multiplyScalar(distance)
-            );
-            
-            // Remove after traveling max range
-            if (distance >= this.attackRange) {
-                this.scene.remove(projectile);
-                return;
-            }
-            
-            requestAnimationFrame(animateProjectile);
-        };
-        
-        animateProjectile();
-    }
-
-    createExplosionEffect(position) {
-        // Create explosion visual effect
-        const geometry = new THREE.SphereGeometry(1);
-        const material = new THREE.MeshBasicMaterial({
-            color: 0xff4400,
-            transparent: true,
-            opacity: 0.8
-        });
-        const explosion = new THREE.Mesh(geometry, material);
-        
-        explosion.position.copy(position);
-        this.scene.add(explosion);
-        
-        // Animate explosion
-        const startTime = Date.now();
-        const duration = 500; // ms
-        
-        const animateExplosion = () => {
-            const elapsed = Date.now() - startTime;
-            const progress = elapsed / duration;
-            
-            if (progress >= 1) {
-                this.scene.remove(explosion);
-                return;
-            }
-            
-            // Scale up and fade out
-            const scale = 1 + progress * 4;
-            explosion.scale.setScalar(scale);
-            explosion.material.opacity = 0.8 * (1 - progress);
-            
-            requestAnimationFrame(animateExplosion);
-        };
-        
-        animateExplosion();
-    }
-
-    updateMovement(deltaTime) {
-        // Move towards target position
-        const direction = this.targetPosition.clone().sub(this.position);
-        const distance = direction.length();
-        
-        if (distance > 0.1) {
-            direction.normalize();
-            const moveDistance = Math.min(this.speed * deltaTime, distance);
-            this.position.add(direction.multiplyScalar(moveDistance));
-        }
-        
-        // Update rotation to face movement direction
-        if (direction.length() > 0.1) {
-            this.rotation.y = Math.atan2(direction.x, direction.z);
-        }
-        
-        // Constrain to world bounds
-        this.constrainToWorldBounds();
-    }
-
-    updateVisualEffects(deltaTime) {
-        // Rotate mesh for visual interest
-        if (this.mesh) {
-            this.mesh.rotation.y += deltaTime * 0.5;
-            
-            // Weapon rotation
-            if (this.weaponMesh) {
-                this.weaponMesh.rotation.z += deltaTime * 2;
-            }
-        }
-        
-        // Update trail
-        this.updateTrail();
-    }
-
-    updateTrail() {
-        // Add current position to trail
-        this.trailPoints.push(this.position.clone());
-        
-        // Limit trail length
-        if (this.trailPoints.length > this.maxTrailPoints) {
-            this.trailPoints.shift();
         }
     }
 
-    updateMeshPosition() {
-        if (this.mesh) {
-            this.mesh.position.copy(this.position);
-            this.mesh.rotation.y = this.rotation.y;
+    updateAnimation(deltaTime) {
+        this.animationFrame += this.animationSpeed * deltaTime;
+        if (this.animationFrame >= 1) {
+            this.animationFrame = 0;
         }
     }
 
-    updateHealthBar() {
-        if (!this.healthBar) return;
-        
-        // Update health bar scale
-        const healthMesh = this.healthBar.userData.healthMesh;
-        const maxWidth = this.healthBar.userData.maxWidth;
-        const healthPercent = this.health / this.maxHealth;
-        
-        healthMesh.scale.x = healthPercent;
-        healthMesh.position.x = (healthPercent - 1) * maxWidth * 0.5;
-        
-        // Update color based on health
-        if (healthPercent > 0.6) {
-            healthMesh.material.color.setHex(0x00ff00);
-        } else if (healthPercent > 0.3) {
-            healthMesh.material.color.setHex(0xffff00);
-        } else {
-            healthMesh.material.color.setHex(0xff0000);
+    updateEffects(deltaTime) {
+        // Update hit flash
+        if (this.hitFlash > 0) {
+            this.hitFlash -= deltaTime;
+        }
+    }
+
+    updateDeathAnimation(deltaTime) {
+        this.deathAnimation += deltaTime;
+        // Enemy will be removed by game logic after death animation
+    }
+
+    updateBlockchainData() {
+        // Throttle blockchain updates
+        if (!this.lastBlockchainUpdate) {
+            this.lastBlockchainUpdate = Date.now();
+            return;
         }
         
-        // Make health bar face camera (simplified)
-        this.healthBar.lookAt(this.position.x, this.position.y + 10, this.position.z + 10);
+        const now = Date.now();
+        if (now - this.lastBlockchainUpdate > 2000) { // Update every 2 seconds
+            this.somniaConnector.emitEnemyAction({
+                action: 'update',
+                enemyType: this.type,
+                state: this.state,
+                x: this.x,
+                y: this.y,
+                health: this.health,
+                timestamp: now
+            });
+            this.lastBlockchainUpdate = now;
+        }
     }
 
     takeDamage(damage) {
-        this.health = Math.max(0, this.health - damage);
+        if (this.isDead) return false;
         
-        // Visual feedback
-        this.flashDamage();
+        this.health -= damage;
+        this.hitFlash = 0.2;
         
         if (this.health <= 0) {
-            this.die();
-        }
-        
-        console.log(`💔 ${this.type} took ${damage} damage. Health: ${this.health}`);
-        
-        return this.health <= 0;
-    }
-
-    flashDamage() {
-        if (this.mesh) {
-            const originalColor = this.mesh.material.color.clone();
-            this.mesh.material.color.setHex(0xffffff);
+            this.health = 0;
+            this.isDead = true;
+            this.deathAnimation = 0;
             
-            setTimeout(() => {
-                if (this.mesh) {
-                    this.mesh.material.color.copy(originalColor);
-                }
-            }, 100);
-        }
-    }
-
-    die() {
-        this.isDead = true;
-        this.deathTime = Date.now();
-        this.state = 'dead';
-        
-        // Death animation
-        if (this.mesh) {
-            // Start spinning and fading
-            this.mesh.material.transparent = true;
-        }
-        
-        console.log(`💀 ${this.type} destroyed!`);
-    }
-
-    updateDeath(deltaTime) {
-        const elapsed = (Date.now() - this.deathTime) / 1000;
-        
-        if (this.mesh) {
-            // Spin faster and fade out
-            this.mesh.rotation.x += deltaTime * 5;
-            this.mesh.rotation.z += deltaTime * 3;
-            this.mesh.material.opacity = Math.max(0, 1 - elapsed * 2);
+            // Send death event to blockchain
+            this.somniaConnector.emitEnemyAction({
+                action: 'death',
+                enemyType: this.type,
+                x: this.x,
+                y: this.y,
+                timestamp: Date.now()
+            });
             
-            // Scale down
-            const scale = Math.max(0, 1 - elapsed);
-            this.mesh.scale.setScalar(scale);
+            return true; // Enemy died
+        }
+        
+        // Send damage event to blockchain
+        this.somniaConnector.emitEnemyAction({
+            action: 'damage',
+            enemyType: this.type,
+            damage: damage,
+            health: this.health,
+            x: this.x,
+            y: this.y,
+            timestamp: Date.now()
+        });
+        
+        return false;
+    }
+
+    checkCollision(other) {
+        return this.x < other.x + other.width &&
+               this.x + this.width > other.x &&
+               this.y < other.y + other.height &&
+               this.y + this.height > other.y;
+    }
+
+    render(ctx) {
+        if (this.isDead && this.deathAnimation > 1.0) {
+            return; // Don't render if death animation is complete
+        }
+        
+        // Save context for transformations
+        ctx.save();
+        
+        // Apply hit flash effect
+        if (this.hitFlash > 0) {
+            ctx.globalAlpha = 0.5;
+        }
+        
+        // Apply death fade effect
+        if (this.isDead) {
+            ctx.globalAlpha = Math.max(0, 1 - this.deathAnimation);
+        }
+        
+        // Draw enemy body
+        ctx.fillStyle = this.hitFlash > 0 ? '#ffffff' : this.color;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        
+        // Draw enemy details based on type
+        this.drawEnemyDetails(ctx);
+        
+        // Draw health bar for living enemies
+        if (!this.isDead && this.health < this.maxHealth) {
+            this.drawHealthBar(ctx);
+        }
+        
+        // Draw state indicator (debug)
+        this.drawStateIndicator(ctx);
+        
+        ctx.restore();
+    }
+
+    drawEnemyDetails(ctx) {
+        switch (this.type) {
+            case 'basic':
+                this.drawBasicEnemy(ctx);
+                break;
+            case 'fast':
+                this.drawFastEnemy(ctx);
+                break;
+            case 'heavy':
+                this.drawHeavyEnemy(ctx);
+                break;
+            case 'sniper':
+                this.drawSniperEnemy(ctx);
+                break;
         }
     }
 
-    constrainToWorldBounds() {
-        const worldSize = 50;
+    drawBasicEnemy(ctx) {
+        // Draw simple robot design
+        ctx.fillStyle = '#cc2222';
+        ctx.fillRect(this.x + 2, this.y + 2, this.width - 4, 6); // Head
         
-        this.position.x = THREE.MathUtils.clamp(this.position.x, -worldSize, worldSize);
-        this.position.z = THREE.MathUtils.clamp(this.position.z, -worldSize, worldSize);
-        this.position.y = Math.max(1, Math.min(20, this.position.y));
+        ctx.fillStyle = '#aa1111';
+        ctx.fillRect(this.x + 1, this.y + 8, this.width - 2, 8); // Body
+        
+        // Eyes
+        ctx.fillStyle = '#ffff00';
+        if (this.facing > 0) {
+            ctx.fillRect(this.x + this.width - 6, this.y + 4, 2, 2);
+        } else {
+            ctx.fillRect(this.x + 4, this.y + 4, 2, 2);
+        }
+        
+        // Legs
+        ctx.fillStyle = '#cc2222';
+        ctx.fillRect(this.x + 4, this.y + 16, 3, 4);
+        ctx.fillRect(this.x + this.width - 7, this.y + 16, 3, 4);
     }
 
-    // Getters
+    drawFastEnemy(ctx) {
+        // Draw sleek, angular design
+        ctx.fillStyle = '#cc4422';
+        
+        // Angular body
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.width / 2, this.y);
+        ctx.lineTo(this.x + this.width, this.y + this.height / 2);
+        ctx.lineTo(this.x + this.width / 2, this.y + this.height);
+        ctx.lineTo(this.x, this.y + this.height / 2);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Speed lines
+        ctx.strokeStyle = '#ff6644';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+            const offset = i * 3;
+            ctx.beginPath();
+            ctx.moveTo(this.x - offset, this.y + 5 + i * 3);
+            ctx.lineTo(this.x - offset - 5, this.y + 5 + i * 3);
+            ctx.stroke();
+        }
+    }
+
+    drawHeavyEnemy(ctx) {
+        // Draw bulky, armored design
+        ctx.fillStyle = '#6622cc';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        
+        // Armor plating
+        ctx.fillStyle = '#4411aa';
+        ctx.fillRect(this.x + 2, this.y + 2, this.width - 4, 4);
+        ctx.fillRect(this.x + 1, this.y + 8, this.width - 2, 6);
+        ctx.fillRect(this.x + 2, this.y + 16, this.width - 4, 4);
+        
+        // Heavy weapon
+        ctx.fillStyle = '#333333';
+        if (this.facing > 0) {
+            ctx.fillRect(this.x + this.width, this.y + 8, 6, 6);
+        } else {
+            ctx.fillRect(this.x - 6, this.y + 8, 6, 6);
+        }
+    }
+
+    drawSniperEnemy(ctx) {
+        // Draw tall, thin sniper design
+        ctx.fillStyle = '#22cc22';
+        ctx.fillRect(this.x + 4, this.y, this.width - 8, this.height);
+        
+        // Scope
+        ctx.fillStyle = '#116611';
+        ctx.fillRect(this.x + 6, this.y + 2, this.width - 12, 4);
+        
+        // Long rifle
+        ctx.fillStyle = '#444444';
+        if (this.facing > 0) {
+            ctx.fillRect(this.x + this.width, this.y + 8, 12, 2);
+        } else {
+            ctx.fillRect(this.x - 12, this.y + 8, 12, 2);
+        }
+        
+        // Laser sight
+        if (this.state === 'attack') {
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            if (this.facing > 0) {
+                ctx.moveTo(this.x + this.width + 12, this.y + 9);
+                ctx.lineTo(this.x + this.width + 50, this.y + 9);
+            } else {
+                ctx.moveTo(this.x - 12, this.y + 9);
+                ctx.lineTo(this.x - 50, this.y + 9);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    drawHealthBar(ctx) {
+        const barWidth = this.width;
+        const barHeight = 3;
+        const barY = this.y - 6;
+        
+        // Background
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(this.x, barY, barWidth, barHeight);
+        
+        // Health
+        ctx.fillStyle = this.health > this.maxHealth * 0.3 ? '#ff4444' : '#ff8888';
+        const healthWidth = (this.health / this.maxHealth) * barWidth;
+        ctx.fillRect(this.x, barY, healthWidth, barHeight);
+    }
+
+    drawStateIndicator(ctx) {
+        // Small state indicator for debugging
+        ctx.fillStyle = this.getStateColor();
+        ctx.fillRect(this.x + this.width - 4, this.y - 4, 3, 3);
+    }
+
+    getStateColor() {
+        switch (this.state) {
+            case 'patrol': return '#00ff00';
+            case 'chase': return '#ffff00';
+            case 'attack': return '#ff0000';
+            case 'return': return '#0000ff';
+            default: return '#ffffff';
+        }
+    }
+
+    // Getters for compatibility
     getPosition() {
-        return this.position.clone();
+        return { x: this.x, y: this.y };
     }
 
     getRadius() {
-        return this.radius;
+        return Math.max(this.width, this.height) / 2;
     }
 
-    isDead() {
-        return this.isDead && this.mesh && this.mesh.material.opacity <= 0;
+    isAlive() {
+        return !this.isDead;
     }
 
-    // Setters
-    setPosition(x, y, z) {
-        this.position.set(x, y, z);
-        this.updateMeshPosition();
-    }
-
-    destroy() {
-        if (this.mesh) {
-            this.scene.remove(this.mesh);
-        }
-        
-        console.log(`💥 ${this.type} enemy destroyed`);
+    shouldRemove() {
+        return this.isDead && this.deathAnimation > 1.0;
     }
 }
