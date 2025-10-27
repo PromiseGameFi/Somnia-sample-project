@@ -4,12 +4,12 @@ A comprehensive test application demonstrating integration with Somnia Explorer 
 
 ## Features
 
-- 🔗 **Somnia Explorer API Integration** - Complete integration with Blockscout-based explorer
-- 📊 **Advanced Logging** - Winston-based logging with file rotation and structured logs
-- 🏥 **Health Monitoring** - Comprehensive health checks for RPC and Explorer APIs
-- 🚀 **Express REST API** - Clean RESTful endpoints for blockchain data
-- 🔒 **Security** - Helmet.js security headers and CORS protection
-- 📝 **TypeScript** - Full TypeScript support with strict type checking
+- **Somnia Explorer API Integration** - Complete integration with Blockscout-based explorer
+- **Advanced Logging** - Winston-based logging with file rotation and structured logs
+- **Health Monitoring** - Comprehensive health checks for RPC and Explorer APIs
+- **Express REST API** - Clean RESTful endpoints for blockchain data
+- **Security** - Helmet.js security headers and CORS protection
+- **TypeScript** - Full TypeScript support with strict type checking
 
 ## Prerequisites
 

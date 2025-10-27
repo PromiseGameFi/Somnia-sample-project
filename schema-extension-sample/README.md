@@ -2,21 +2,21 @@
 
 A practical demonstration of schema extension and reusability in Somnia Data Streams. This sample project shows how to build composable data structures by extending base schemas for different domains.
 
-## 🎯 What You'll Learn
+## What You'll Learn
 
 - **Schema Extension**: How to create schemas that inherit from base schemas
 - **Code Reusability**: Using the same base structure across multiple domains
 - **Practical Implementation**: Real-world examples with driver tracking and delivery systems
 - **Best Practices**: Proper schema registration order and data management
 
-## 📋 Prerequisites
+## Prerequisites
 
 - Node.js 18+ installed
 - Access to Somnia Network (Testnet or Mainnet)
 - A wallet private key for publishing data
 - Basic understanding of blockchain concepts
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Installation
 
@@ -36,12 +36,11 @@ cp .env.example .env
 
 # Edit .env with your configuration
 # RPC_URL=https://dream-rpc.somnia.network
-# PRIVATE_KEY=2bfcb63ac1e8363edeccc7f4fee7f4a1f7eadb13248a542bf94a2ac5e1943e93
+# PRIVATE_KEY= your private key
 ```
 
-⚠️ **Security Note**: Never commit your private key to version control. Keep it secure and use environment variables.
+**Security Note**: Never commit your private key to version control. Keep it secure and use environment variables.
 
-💡 **Private Key Format**: You can provide your private key with or without the `0x` prefix - the code automatically handles both formats.
 
 ### 3. Register Schemas
 
@@ -63,7 +62,7 @@ npm run demo-delivery
 npm start
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 schema-extension-sample/
@@ -79,7 +78,7 @@ schema-extension-sample/
 └── README.md             # This file
 ```
 
-## 🏗️ Schema Architecture
+## Schema Architecture
 
 ### Base Schema: Coordinates
 ```javascript
@@ -108,7 +107,7 @@ schema-extension-sample/
 }
 ```
 
-## 💡 Key Concepts Demonstrated
+## Key Concepts Demonstrated
 
 ### 1. Schema Inheritance
 - Extended schemas automatically inherit all fields from their parent
@@ -125,7 +124,7 @@ schema-extension-sample/
 - Blockchain-level enforcement of data structure
 - Compile-time and runtime type checking
 
-## 🎮 Demo Scenarios
+## Demo Scenarios
 
 ### Driver Demo (`npm run demo-driver`)
 Simulates a ride-sharing driver's journey:
@@ -143,7 +142,7 @@ Tracks a package through delivery stages:
 4. **Out for delivery** - Final mile
 5. **Delivered** - Successfully completed
 
-## 🔧 Available Scripts
+## Available Scripts
 
 | Script | Description |
 |--------|-------------|
@@ -153,7 +152,7 @@ Tracks a package through delivery stages:
 | `npm run demo-delivery` | Run delivery tracking demo |
 | `npm run dev` | Development mode with auto-reload |
 
-## 🎭 Demo Mode
+## Demo Mode
 
 The demo applications include a **demo mode** that simulates blockchain operations without requiring actual network calls. This is useful for:
 
@@ -172,14 +171,14 @@ When demo mode is enabled (which it is by default in the demo scripts):
 
 ### Demo Mode Output Example
 ```
-📍 Publishing driver location update...
-✅ Published! Transaction: 0xabcd1234... (simulated)
-📊 Data ID: 0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890
+Publishing driver location update...
+Published! Transaction: 0xabcd1234... (simulated)
+Data ID: 0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890
 ```
 
 The `(simulated)` indicator shows when demo mode is active. To use real blockchain operations, modify the demo scripts to remove the demo mode configuration.
 
-## 🌐 Real-World Applications
+## Real-World Applications
 
 This pattern enables building scalable, interoperable systems:
 
@@ -189,7 +188,7 @@ This pattern enables building scalable, interoperable systems:
 - **Asset Tracking**: Inventory, equipment, vehicles
 - **Gaming**: Player locations, virtual worlds
 
-## 🔍 Understanding the Code
+## Understanding the Code
 
 ### Schema Registration Order
 ```javascript
@@ -224,7 +223,7 @@ await sdk.streams.set([{
 }])
 ```
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -250,7 +249,7 @@ await sdk.streams.set([{
 3. Ensure environment variables are correctly set
 4. Verify Node.js version compatibility (18+)
 
-## 📚 Next Steps
+## Next Steps
 
 After running this sample:
 
@@ -260,7 +259,7 @@ After running this sample:
 4. **Scale Up**: Deploy to production with proper error handling
 5. **Integrate**: Connect with existing applications and APIs
 
-## 🤝 Contributing
+## Contributing
 
 This is a sample project for educational purposes. Feel free to:
 - Fork and modify for your use case
@@ -268,10 +267,10 @@ This is a sample project for educational purposes. Feel free to:
 - Share your own schema extension examples
 - Provide feedback on documentation
 
-## 📄 License
+## License
 
 MIT License - feel free to use this code in your own projects.
 
 ---
 
-**Happy Building with Somnia Data Streams! 🚀**
+**Happy Building with Somnia Data Streams!**

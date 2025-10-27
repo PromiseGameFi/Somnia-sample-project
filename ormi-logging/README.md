@@ -2,7 +2,7 @@
 
 A comprehensive TypeScript implementation demonstrating enterprise-grade logging and health monitoring for ORMI API integrations on the Somnia Testnet.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -45,7 +45,7 @@ npm test
 npm run health-check
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 src/
@@ -62,36 +62,36 @@ src/
 └── index.ts          # Application entry point
 ```
 
-## 🔧 Features
+## Features
 
-### ✅ Winston Logging System
+### Winston Logging System
 - ORMI-specific log formatters
 - Structured JSON output
 - Multiple transport options (console, file)
 - Log rotation and archiving
 - Performance metrics logging
 
-### ✅ Health Monitoring
+### Health Monitoring
 - ORMI API connectivity checks
 - Performance metrics tracking
 - Automated health status reporting
 - Historical health data
 - Express endpoints for monitoring
 
-### ✅ API Client Features
+### API Client Features
 - Bearer token authentication
 - Request/response interceptors
 - Automatic retry mechanisms
 - Rate limiting protection
 - Error handling and recovery
 
-### ✅ ERC20 Integration
+### ERC20 Integration
 - Token balance retrieval
 - Multi-token support
 - STT value conversion
 - Privacy-protected logging
 
-## 🧪 Testing
+## Testing
 
 ### Run Integration Tests
 
@@ -111,7 +111,7 @@ curl http://localhost:3000/metrics
 curl -X GET "http://localhost:3000/api/balance/0x742d35Cc6634C0532925a3b8D4C9db96c4b4d8b6"
 ```
 
-## 📊 Monitoring
+## Monitoring
 
 ### Health Check Endpoints
 
@@ -143,7 +143,7 @@ curl -X GET "http://localhost:3000/api/balance/0x742d35Cc6634C0532925a3b8D4C9db9
 }
 ```
 
-## 🔒 Security
+## Security
 
 - API keys stored in environment variables
 - Bearer token authentication
@@ -151,7 +151,7 @@ curl -X GET "http://localhost:3000/api/balance/0x742d35Cc6634C0532925a3b8D4C9db9
 - Helmet security headers
 - Input validation and sanitization
 
-## 🚀 Production Deployment
+## Production Deployment
 
 ### Environment Variables
 
@@ -176,7 +176,7 @@ EXPOSE 3000
 CMD ["npm", "start"]
 ```
 
-## 📚 Documentation
+## Documentation
 
 For detailed implementation guide, see:
 - [Somnia Developer Documentation](https://docs.somnia.network)

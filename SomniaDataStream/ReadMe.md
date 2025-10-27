@@ -1,8 +1,8 @@
-# Somnia Data Stream Platformer 🎮
+# Somnia Data Stream Platformer
 
 A real-time 2D platformer game built with **Somnia Data Streams** to demonstrate the power of reactive blockchain programming. This project showcases how to build engaging, real-time applications that leverage blockchain technology for enhanced gameplay experiences.
 
-## 🎮 Game Overview
+## Game Overview
 
 **Somnia Data Stream Platformer** is an action-packed 2D platformer where players:
 - Navigate through platform-based levels
@@ -11,7 +11,7 @@ A real-time 2D platformer game built with **Somnia Data Streams** to demonstrate
 - Experience real-time blockchain data visualization
 - See live blockchain events as visual effects
 
-## 🌟 Key Features
+## Key Features
 
 ### Real-time Blockchain Integration
 - **Live Data Streams**: Player actions are streamed in real-time using Somnia Data Streams
@@ -32,7 +32,7 @@ A real-time 2D platformer game built with **Somnia Data Streams** to demonstrate
 - **Visual Feedback**: Clear indicators of blockchain activity
 - **Easy Setup**: No wallet connection required for testing
 
-## 🛠 Technology Stack
+## Technology Stack
 
 - **Frontend**: Vanilla JavaScript, HTML5 Canvas, Vite
 - **Blockchain**: Somnia Network, Ethers.js
@@ -40,7 +40,7 @@ A real-time 2D platformer game built with **Somnia Data Streams** to demonstrate
 - **Build Tool**: Vite
 - **Styling**: Modern CSS with animations
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Node.js (v16 or higher)
@@ -86,7 +86,7 @@ VITE_GAME_CONTRACT_ADDRESS=0xYourContractAddress
 - `VITE_DEV_MODE=true` - Demo mode without MetaMask (default)
 - `VITE_DEV_MODE=false` - Production mode requiring wallet connection
 
-## 🎯 How to Play
+## How to Play
 
 1. **Launch Game**: Click "Launch Game" to start (no wallet required in demo mode)
 2. **Controls**:
@@ -102,7 +102,7 @@ VITE_GAME_CONTRACT_ADDRESS=0xYourContractAddress
    - Watch blockchain data streams in real-time
    - Complete levels to progress
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 SomniaDataStream/
@@ -129,7 +129,7 @@ SomniaDataStream/
 └── vite.config.js               # Build configuration
 ```
 
-## 🔗 Somnia Data Streams Integration
+## Somnia Data Streams Integration
 
 This project demonstrates several key concepts of Somnia Data Streams:
 
@@ -161,7 +161,7 @@ this.somniaConnector.onLeaderboardUpdate((leaderboard) => {
 });
 ```
 
-## 🎨 Customization
+## Customization
 
 ### Adding New Enemy Types
 1. Extend the `Enemy` class in `src/game/entities/Enemy.js`
@@ -178,7 +178,7 @@ this.somniaConnector.onLeaderboardUpdate((leaderboard) => {
 - **Physics**: Modify parameters in `src/game/Game.js`
 - **Controls**: Update mappings in `src/game/InputManager.js`
 
-## 🧪 Testing
+## Testing
 
 ### Development Testing
 ```bash
@@ -196,7 +196,7 @@ npm run preview
 npm run deploy
 ```
 
-## 📊 Performance Optimization
+## Performance Optimization
 
 The game includes several optimization techniques:
 - **Spatial Partitioning**: Efficient collision detection
@@ -204,7 +204,7 @@ The game includes several optimization techniques:
 - **LOD System**: Level-of-detail for distant objects
 - **Frustum Culling**: Only render visible objects
 
-## 🔧 Configuration
+## Configuration
 
 ### Game Settings
 Modify game parameters in `src/game/GameState.js`:
@@ -228,7 +228,7 @@ const SOMNIA_NETWORK = {
 };
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -236,17 +236,17 @@ const SOMNIA_NETWORK = {
 4. Test thoroughly
 5. Submit a pull request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🆘 Support
+## Support
 
 - **Documentation**: Check the `/docs` folder for detailed guides
 - **Issues**: Report bugs on GitHub Issues
 - **Community**: Join our Discord for discussions
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Somnia Network**: For providing the blockchain infrastructure
 - **Three.js Community**: For the amazing 3D graphics library
@@ -254,4 +254,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**Built with ❤️ for the Somnia ecosystem**
+**Built with love for the Somnia ecosystem**

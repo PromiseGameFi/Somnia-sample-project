@@ -2,7 +2,7 @@
 
 A curated collection of Solidity smart contracts demonstrating common security vulnerabilities and their secure implementations. This repository serves as an educational resource for developers learning smart contract security best practices.
 
-## 🎯 Purpose
+## Purpose
 
 This repository provides **side-by-side comparisons** of vulnerable and secure smart contract implementations, making it easy to understand:
 
@@ -10,7 +10,7 @@ This repository provides **side-by-side comparisons** of vulnerable and secure s
 - **How to fix vulnerabilities** - Secure implementations with detailed explanations
 - **Why security matters** - Real-world context and impact of each vulnerability type
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 contracts/
@@ -26,7 +26,7 @@ contracts/
     └── UpgradeableSecure.sol
 ```
 
-## 🔍 Vulnerability Categories
+## Vulnerability Categories
 
 ### 1. Reentrancy Attacks
 - **Vulnerable**: [`ReentrancyVulnerable.sol`](contracts/vulnerable/ReentrancyVulnerable.sol)
@@ -60,7 +60,7 @@ Explores security considerations in proxy patterns and upgradeable contracts.
 
 **Key Learning**: Storage layout preservation, initialization security, and upgrade authorization
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - [Foundry](https://getfoundry.sh/) or [Hardhat](https://hardhat.org/) for local development
@@ -93,7 +93,7 @@ forge build
 forge test
 ```
 
-## 📚 Educational Features
+## Educational Features
 
 ### Comprehensive Documentation
 Each contract includes:
@@ -113,7 +113,7 @@ Each contract includes:
 - Includes **historical examples** and impact assessments
 - Demonstrates **current best practices** and industry standards
 
-## ⚠️ Important Security Notice
+## Important Security Notice
 
 **WARNING**: The contracts in the `vulnerable/` directory contain intentional security flaws and should **NEVER** be deployed with real funds on any network. They are designed purely for educational purposes.
 
@@ -124,14 +124,14 @@ Each contract includes:
 - ❌ **NEVER deploy vulnerable contracts on mainnet**
 - ❌ **NEVER use with real funds**
 
-## 🎓 Learning Path
+## Learning Path
 
 1. **Start with Reentrancy** - The most common and impactful vulnerability
 2. **Study Access Control** - Foundation of smart contract security
 3. **Understand Integer Issues** - Critical for financial applications
 4. **Explore Upgradeability** - Advanced topic for complex systems
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please ensure:
 - New vulnerabilities include both vulnerable and secure implementations
@@ -139,14 +139,14 @@ Contributions are welcome! Please ensure:
 - Examples are Remix-compatible and self-contained
 - Security warnings are prominently displayed
 
-## 📖 Additional Resources
+## Additional Resources
 
 - [Smart Contract Security Documentation](../../../SmartContract/) - Comprehensive security guide
 - [OpenZeppelin Security Guidelines](https://docs.openzeppelin.com/contracts/4.x/security)
 - [ConsenSys Smart Contract Best Practices](https://consensys.github.io/smart-contract-best-practices/)
 - [SWC Registry](https://swcregistry.io/) - Smart Contract Weakness Classification
 
-## 📄 License
+## License
 
 MIT License - See [LICENSE](LICENSE) file for details.
 
