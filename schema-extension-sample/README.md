@@ -228,7 +228,7 @@ await sdk.streams.set([{
 ### Common Issues
 
 **Schema Registration Fails**
-- Ensure your private key has sufficient funds for gas
+- Ensure your address has sufficient funds for gas
 - Verify RPC URL is correct and accessible
 - Check that parent schemas are registered first
 
