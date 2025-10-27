@@ -242,15 +242,6 @@ await sdk.streams.set([{
 - Check firewall settings
 - Confirm RPC endpoint is operational
 
-### Getting Help
-
-1. Check the [Somnia Data Streams Documentation](https://msquared.gitbook.io/somnia-data-streams/)
-2. Review error messages for specific guidance
-3. Ensure environment variables are correctly set
-4. Verify Node.js version compatibility (18+)
-
-## Next Steps
-
 After running this sample:
 
 1. **Extend Further**: Create your own schema extensions
