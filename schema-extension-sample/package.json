@@ -1,0 +1,34 @@
+{
+  "name": "somnia-schema-extension-sample",
+  "version": "1.0.0",
+  "description": "Sample project demonstrating schema extension and reusability in Somnia Data Streams",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "register-schemas": "node src/register-schemas.js",
+    "demo-driver": "node src/demo-driver.js",
+    "demo-delivery": "node src/demo-delivery.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "somnia",
+    "data-streams",
+    "schema",
+    "blockchain",
+    "web3"
+  ],
+  "author": "Somnia Developer",
+  "license": "MIT",
+  "dependencies": {
+    "@somnia-chain/streams": "^0.7.1",
+    "viem": "^2.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
