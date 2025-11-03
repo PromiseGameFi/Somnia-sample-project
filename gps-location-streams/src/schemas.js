@@ -47,7 +47,7 @@ export class GPSSchemaManager {
   async registerGPSSchema() {
     const gpsSchema = {
       id: "gps_location",
-      schema: 'uint64 timestamp, int256 latitude, int256 longitude, int256 altitude, uint256 speed, bytes32 deviceId',
+      schema: 'bytes32 deviceId, uint64 timestamp, int256 latitude, int256 longitude, int256 altitude, uint256 speed',
       parentSchemaId: '0x0000000000000000000000000000000000000000000000000000000000000000'
     }
 

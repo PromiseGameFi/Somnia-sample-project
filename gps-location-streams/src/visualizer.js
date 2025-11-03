@@ -1,18 +1,18 @@
-import { SDK } from '@somnia-chain/streams'
+import { SDK as SomniaSDK } from '@somnia-chain/streams'
 import { decodeAbiParameters, parseAbiParameters, createPublicClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import dotenv from 'dotenv'
 
-// Load environment variables
+// Load environment variables from .env file
 dotenv.config()
 
 // Somnia chain configuration
 const somniaChain = {
-  id: 2648,
-  name: 'Somnia',
-  network: 'somnia',
+  id: 50312,
+  name: 'Somnia Testnet',
+  network: 'somnia-testnet',
   nativeCurrency: {
     decimals: 18,
     name: 'STT',
@@ -20,87 +20,132 @@ const somniaChain = {
   },
   rpcUrls: {
     default: {
-      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://rpc.somnia.network'],
+      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
     public: {
-      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://rpc.somnia.network'],
+      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
   },
 }
 
-export class GPSVisualizer {
+class GPSVisualizer {
   constructor() {
-    this.app = express()
-    this.port = parseInt(process.env.PORT) || 3000
     this.devices = new Map()
-    this.isSubscribed = false
-    this.mockMode = process.env.MOCK_DATA === 'true'
     this.sdk = null
     this.account = null
     this.publicClient = null
     this.subscription = null
+    this.isSubscribed = false
+    this.port = process.env.PORT || 3001
+    this.wss = null
   }
 
-  // Initialize SDK and clients
+  // Initialize Somnia SDK
   async initializeSDK() {
     try {
-      if (this.mockMode) {
-        console.log('🔧 Initializing Visualizer in Mock Mode...')
-        console.log('👤 Mock Account: 0x1234567890123456789012345678901234567890')
-        console.log('✅ Mock SDK initialized successfully')
-        return
-      }
-
       console.log('🔧 Initializing Somnia SDK...')
       
-      // Create account from private key
+      // Get private key from environment
       const privateKey = process.env.SOMNIA_PRIVATE_KEY || process.env.PRIVATE_KEY
       if (!privateKey) {
-        throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
+        throw new Error('Private key not found in environment variables')
       }
-      
-      this.account = privateKeyToAccount(privateKey)
-      console.log(`👤 Account: ${this.account.address}`)
 
-      // Create public client
+      // Create account from private key
+      this.account = privateKeyToAccount(privateKey)
+      this.publisherAddress = this.account.address // Store publisher address for filtering
+      console.log(`📱 Account: ${this.account.address}`)
+      console.log(`🎯 Filtering GPS transactions from publisher: ${this.publisherAddress}`)
+
+      // Create public client for reading data
       this.publicClient = createPublicClient({
         chain: somniaChain,
-        transport: http()
+        transport: http(process.env.SOMNIA_RPC_URL || process.env.RPC_URL)
       })
 
-      // Initialize SDK
-      this.sdk = new SDK({
-        account: this.account,
-        publicClient: this.publicClient,
-        walletClient: null // We only need to read data
+      // Initialize SDK for reading data
+      this.sdk = new SomniaSDK({
+        privateKey,
+        rpcUrl: process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network',
+        chainId: parseInt(process.env.SOMNIA_CHAIN_ID || process.env.CHAIN_ID || '50312')
       })
 
-      console.log('✅ SDK initialized successfully')
-      
+      console.log('✅ Somnia SDK initialized successfully')
     } catch (error) {
       console.error('❌ Failed to initialize SDK:', error)
       throw error
     }
   }
 
-  // Decode GPS data from blockchain transaction
+  // Decode GPS data from transaction input
   decodeGPSData(transactionData) {
     try {
-      // The transaction data contains encoded GPS information
+      // Debug: Log the raw transaction data
+      console.log(`🔍 RAW TRANSACTION DATA: ${transactionData}`)
+      console.log(`🔍 DATA LENGTH: ${transactionData.length}`)
+      
+      // Remove '0x' prefix if present
+      const cleanData = transactionData.startsWith('0x') ? transactionData.slice(2) : transactionData
+      console.log(`🔍 CLEAN DATA LENGTH: ${cleanData.length}`)
+      console.log(`🔍 CLEAN DATA (first 100 chars): ${cleanData.substring(0, 100)}...`)
+      
+      // Validate data length (should be at least 384 hex chars = 192 bytes for our schema)
+      // 6 parameters × 32 bytes each = 192 bytes = 384 hex characters
+      if (cleanData.length < 384) {
+        console.log(`⚠️ Data too short: ${cleanData.length} < 384`)
+        return null // Not enough data for GPS schema
+      }
+      
+      // Extract the full 384 hex characters (our GPS data)
+      const gpsData = cleanData.substring(0, 384)
+      console.log(`🔍 EXTRACTED GPS DATA (384 chars): ${gpsData}`)
+      
+      // Decode the GPS data using the schema format
       const [deviceId, timestamp, latitude, longitude, altitude, speed] = decodeAbiParameters(
         parseAbiParameters('bytes32, uint64, int256, int256, int256, uint256'),
-        transactionData
+        `0x${gpsData}`
       )
+      
+      // Debug: Log the raw decoded values
+      console.log('🔍 DEBUG - Decoded raw values:')
+      console.log(`  deviceId: ${deviceId}`)
+      console.log(`  timestamp: ${timestamp}`)
+      console.log(`  latitude (raw): ${latitude}`)
+      console.log(`  longitude (raw): ${longitude}`)
+      console.log(`  altitude: ${altitude}`)
+      console.log(`  speed: ${speed}`)
+
+      // Convert and validate coordinates
+      const lat = Number(latitude) / 1000000 // Convert from fixed-point
+      const lon = Number(longitude) / 1000000 // Convert from fixed-point
+      const alt = Number(altitude)
+      const spd = Number(speed)
+
+      // Validate realistic GPS coordinates
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        console.warn(`⚠️ Invalid coordinates: ${lat}, ${lon}`)
+        return null
+      }
+
+      // Validate reasonable speed (0-500 km/h)
+      if (spd < 0 || spd > 500) {
+        console.warn(`⚠️ Invalid speed: ${spd} km/h`)
+        return null
+      }
 
       return {
         deviceId: deviceId,
         timestamp: Number(timestamp),
-        latitude: Number(latitude) / 1000000, // Convert back from 6 decimal precision
-        longitude: Number(longitude) / 1000000,
-        altitude: Number(altitude),
-        speed: Number(speed)
+        latitude: lat,
+        longitude: lon,
+        altitude: alt,
+        speed: spd
       }
     } catch (error) {
+      // Only log actual decoding errors, not validation failures
+      if (error.name === 'PositionOutOfBoundsError') {
+        return null // Silently ignore invalid data
+      }
       console.error('❌ Failed to decode GPS data:', error)
       return null
     }
@@ -170,41 +215,6 @@ export class GPSVisualizer {
     try {
       console.log('🔄 Subscribing to GPS data streams...')
       
-      if (this.mockMode) {
-        console.log('🔄 [MOCK] Starting mock GPS data simulation...')
-        
-        // In mock mode, simulate receiving GPS data from the publisher
-        const mockDevices = [
-          { id: '0x7a0511d97ec8100f712168551066872f3459aa3c075b5d601f051789d1d9aab4', name: 'Delivery Truck Alpha' },
-          { id: '0x8b1622e08fc8200e823279662177983e4569bb3d86c6e712f162890e2e9bbc5', name: 'Fleet Vehicle Beta' },
-          { id: '0x9c2733f19fd9311f934380773288094f567acc4e97d7f823f273901f3faccd6', name: 'Service Van Gamma' }
-        ]
-        
-        // Simulate receiving GPS data every 5 seconds
-        this.mockInterval = setInterval(() => {
-          mockDevices.forEach((device, index) => {
-            const mockGPSData = {
-              deviceId: device.id,
-              deviceName: device.name,
-              timestamp: BigInt(Date.now()),
-              latitude: BigInt(Math.floor((40.7128 + (Math.random() - 0.5) * 0.01) * 1000000)), // NYC area
-              longitude: BigInt(Math.floor((-74.0060 + (Math.random() - 0.5) * 0.01) * 1000000)),
-              altitude: BigInt(Math.floor(Math.random() * 100 + 50)),
-              speed: BigInt(Math.floor(Math.random() * 80 + 20))
-            }
-            this.updateDevice(mockGPSData)
-          })
-        }, 5000)
-        
-        this.isSubscribed = true
-        console.log('✅ [MOCK] Successfully started mock GPS data simulation')
-        return
-      }
-      
-      // Real blockchain mode
-      // Since we're publishing GPS data as transactions, we'll monitor new blocks
-      // and filter transactions that contain GPS data
-      
       // Monitor new blocks for GPS transactions
       const unwatch = this.publicClient.watchBlocks({
         onBlock: async (block) => {
@@ -217,15 +227,18 @@ export class GPSVisualizer {
             
             // Process transactions that might contain GPS data
             for (const tx of fullBlock.transactions) {
-              if (tx.input && tx.input !== '0x' && tx.input.length > 10) {
-                try {
-                  // Try to decode as GPS data
-                  const gpsData = this.decodeGPSData(tx.input)
-                  if (gpsData) {
-                    this.updateDevice(gpsData)
-                  }
-                } catch (error) {
-                  // Not GPS data, ignore
+              // Filter transactions: only process transactions TO the publisher address (GPS data transactions)
+              if (tx.to && tx.to.toLowerCase() === this.publisherAddress.toLowerCase() && 
+                  tx.input && tx.input !== '0x' && tx.input.length > 10) {
+                console.log(`🔍 Processing GPS transaction: ${tx.hash.slice(0, 10)}... from ${tx.from} to ${tx.to}`)
+                
+                // Try to decode as GPS data
+                const gpsData = this.decodeGPSData(tx.input)
+                if (gpsData) {
+                  console.log(`✅ Successfully decoded GPS data from transaction ${tx.hash.slice(0, 10)}...`)
+                  this.updateDevice(gpsData)
+                } else {
+                  console.log(`❌ Failed to decode GPS data from transaction ${tx.hash.slice(0, 10)}...`)
                 }
               }
             }
@@ -247,17 +260,19 @@ export class GPSVisualizer {
 
   // Setup web server and WebSocket
   setupWebServer() {
+    const app = express()
+    
     // Serve static files
-    this.app.use(express.static('public'))
+    app.use(express.static('public'))
     
     // API endpoint to get all devices
-    this.app.get('/api/devices', (req, res) => {
+    app.get('/api/devices', (req, res) => {
       const devicesArray = Array.from(this.devices.values())
       res.json(devicesArray)
     })
 
     // API endpoint to get specific device
-    this.app.get('/api/devices/:id', (req, res) => {
+    app.get('/api/devices/:id', (req, res) => {
       const device = this.devices.get(req.params.id)
       if (device) {
         res.json(device)
@@ -267,12 +282,12 @@ export class GPSVisualizer {
     })
 
     // Serve the main dashboard
-    this.app.get('/', (req, res) => {
+    app.get('/', (req, res) => {
       res.send(this.getDashboardHTML())
     })
 
     // Start HTTP server
-    const server = this.app.listen(this.port, () => {
+    const server = app.listen(this.port, () => {
       console.log(`🌐 GPS Dashboard running at http://localhost:${this.port}`)
     })
 
@@ -660,11 +675,6 @@ export class GPSVisualizer {
       this.subscription() // Call the unwatch function
     }
     
-    // Clean up mock interval if in mock mode
-    if (this.mockInterval) {
-      clearInterval(this.mockInterval)
-    }
-    
     if (this.wss) {
       this.wss.close()
     }
@@ -674,16 +684,12 @@ export class GPSVisualizer {
 
 // Main execution
 async function main() {
-  // Validate environment variables (skip in mock mode)
-  const mockMode = process.env.MOCK_DATA === 'true'
-  
-  if (!mockMode) {
-    if (!process.env.SOMNIA_PRIVATE_KEY && !process.env.PRIVATE_KEY) {
-      throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
-    }
-    if (!process.env.SOMNIA_RPC_URL && !process.env.RPC_URL) {
-      throw new Error('SOMNIA_RPC_URL (or RPC_URL) not found in environment variables')
-    }
+  // Validate environment variables
+  if (!process.env.SOMNIA_PRIVATE_KEY && !process.env.PRIVATE_KEY) {
+    throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
+  }
+  if (!process.env.SOMNIA_RPC_URL && !process.env.RPC_URL) {
+    throw new Error('SOMNIA_RPC_URL (or RPC_URL) not found in environment variables')
   }
 
   const visualizer = new GPSVisualizer()

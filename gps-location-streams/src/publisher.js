@@ -7,9 +7,9 @@ dotenv.config()
 
 // Somnia chain configuration
 const somniaChain = {
-  id: 2648,
-  name: 'Somnia',
-  network: 'somnia',
+  id: 50312,
+  name: 'Somnia Testnet',
+  network: 'somnia-testnet',
   nativeCurrency: {
     decimals: 18,
     name: 'STT',
@@ -17,10 +17,10 @@ const somniaChain = {
   },
   rpcUrls: {
     default: {
-      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://rpc.somnia.network'],
+      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
     public: {
-      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://rpc.somnia.network'],
+      http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
   },
 }
@@ -32,6 +32,7 @@ export class GPSPublisher {
     this.deviceCount = parseInt(process.env.DEVICE_COUNT) || 3
     this.isPublishing = false
     this.mockMode = process.env.MOCK_DATA === 'true'
+    this.schemaId = 'gps_location_v1' // Use the registered schema ID
     this.sdk = null
     this.account = null
     this.publicClient = null
@@ -200,30 +201,61 @@ export class GPSPublisher {
         return
       }
       
-      // Real blockchain mode
-      // For now, we'll emit a simple transaction with GPS data
-      // In a real implementation, this would interact with a smart contract
-      // that handles GPS data storage and event emission
+      // Real blockchain mode - use transaction-based publishing with registered schema
+      console.log(`📋 Using registered schema: ${this.schemaId}`)
       
       for (const event of gpsEvents) {
-        // Create a simple transaction that includes GPS data in the transaction data
-        const gpsData = encodeAbiParameters(
-          parseAbiParameters('bytes32, uint64, int256, int256, int256, uint256'),
-          [event.deviceId, event.timestamp, event.latitude, event.longitude, event.altitude, event.speed]
-        )
-        
-        // Send a transaction with GPS data
-        // Note: In a production system, this would call a smart contract method
-        const hash = await this.walletClient.sendTransaction({
-          account: this.account,
-          to: this.account.address, // Self-transaction for demo purposes
-          data: gpsData,
-          value: 0n
-        })
-        
-        console.log(`📡 Published GPS data for ${event.deviceName} (tx: ${hash.slice(0, 10)}...)`)
-        console.log(`  📍 Location: ${(Number(event.latitude) / 1000000).toFixed(6)}, ${(Number(event.longitude) / 1000000).toFixed(6)}`)
-        console.log(`  🚗 Speed: ${Number(event.speed)} km/h, Altitude: ${Number(event.altitude)}m`)
+        try {
+          // Debug: Log the raw values being encoded
+          console.log(`🔍 DEBUG - Encoding values for ${event.deviceName}:`)
+          console.log(`  deviceId: ${event.deviceId}`)
+          console.log(`  timestamp: ${event.timestamp}`)
+          console.log(`  latitude (raw): ${event.latitude}`)
+          console.log(`  longitude (raw): ${event.longitude}`)
+          console.log(`  altitude: ${event.altitude}`)
+          console.log(`  speed: ${event.speed}`)
+          
+          // TEST: Use simple hardcoded values to debug encoding
+          const testDeviceId = '0x1234567890123456789012345678901234567890123456789012345678901234'
+          const testTimestamp = BigInt(1640995200) // 2022-01-01 00:00:00
+          const testLatitude = BigInt(40681110) // 40.681110 * 1000000
+          const testLongitude = BigInt(-74005353) // -74.005353 * 1000000
+          const testAltitude = BigInt(131)
+          const testSpeed = BigInt(55)
+          
+          console.log(`🧪 TEST - Using hardcoded values:`)
+          console.log(`  deviceId: ${testDeviceId}`)
+          console.log(`  timestamp: ${testTimestamp}`)
+          console.log(`  latitude: ${testLatitude}`)
+          console.log(`  longitude: ${testLongitude}`)
+          console.log(`  altitude: ${testAltitude}`)
+          console.log(`  speed: ${testSpeed}`)
+          
+          // Encode GPS data using the registered schema format
+          const gpsData = encodeAbiParameters(
+            parseAbiParameters('bytes32, uint64, int256, int256, int256, uint256'),
+            [testDeviceId, testTimestamp, testLatitude, testLongitude, testAltitude, testSpeed]
+          )
+          
+          // Publish data via blockchain transaction using a simple contract call approach
+          const hash = await this.walletClient.sendTransaction({
+            account: this.account,
+            to: this.account.address, // Send to self
+            data: gpsData,
+            value: 0n,
+            gas: 100000n, // Fixed gas limit
+            gasPrice: 10000000000n, // 10 gwei
+            type: 'legacy' // Use legacy transaction format
+          })
+          
+          console.log(`📡 Published GPS data for ${event.deviceName} to blockchain (tx: ${hash.slice(0, 10)}...)`)
+          console.log(`  📍 Location: ${(Number(event.latitude) / 1000000).toFixed(6)}, ${(Number(event.longitude) / 1000000).toFixed(6)}`)
+          console.log(`  🚗 Speed: ${Number(event.speed)} km/h, Altitude: ${Number(event.altitude)}m`)
+          console.log(`  📋 Schema: ${this.schemaId}`)
+          
+        } catch (publishError) {
+          console.error(`❌ Failed to publish data for ${event.deviceName}:`, publishError.message)
+        }
       }
 
     } catch (error) {
