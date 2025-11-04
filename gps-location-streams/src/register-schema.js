@@ -1,6 +1,6 @@
 import { SDK } from '@somnia-chain/streams';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createPublicClient, createWalletClient, http, defineChain } from 'viem';
+import { createPublicClient, createWalletClient, http, defineChain, keccak256, toBytes } from 'viem';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -100,9 +100,17 @@ class SchemaRegistrar {
       // Register the schema using the SDK
       const result = await this.sdk.streams.registerDataSchemas([GPS_LOCATION_SCHEMA], true);
 
-      this.schemaId = GPS_LOCATION_SCHEMA.id;
+      console.log('🔍 Registration result:', result);
+      console.log('🔍 Result type:', typeof result);
+      console.log('🔍 Result keys:', Object.keys(result || {}));
+
+      // Generate the bytes32 schema ID using keccak256 hash of the schema name
+      // This is the standard way schema IDs are generated in blockchain applications
+      this.schemaId = keccak256(toBytes(GPS_LOCATION_SCHEMA.id));
+      
       console.log('✅ Schema registered successfully!');
-      console.log(`📋 Schema ID: ${this.schemaId}`);
+      console.log(`📋 Schema Name: ${GPS_LOCATION_SCHEMA.id}`);
+      console.log(`📋 Schema ID (bytes32): ${this.schemaId}`);
       console.log(`📋 Schema: ${GPS_LOCATION_SCHEMA.schema}`);
       
       return result;
@@ -134,7 +142,8 @@ class SchemaRegistrar {
     console.log('\n' + '='.repeat(60));
     console.log('📊 SCHEMA REGISTRATION SUMMARY');
     console.log('='.repeat(60));
-    console.log(`📋 Schema ID: ${GPS_LOCATION_SCHEMA.id}`);
+    console.log(`📋 Schema Name: ${GPS_LOCATION_SCHEMA.id}`);
+    console.log(`📋 Schema ID (bytes32): ${this.schemaId}`);
     console.log(`📝 Schema Definition: ${GPS_LOCATION_SCHEMA.schema}`);
     console.log(`🆔 Parent Schema ID: ${GPS_LOCATION_SCHEMA.parentSchemaId}`);
     console.log(`🌐 Network: Somnia (Chain ID: ${this.chainId})`);

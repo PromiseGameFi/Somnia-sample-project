@@ -1,13 +1,13 @@
-import { SDK } from '@somnia-chain/streams'
-import { encodeAbiParameters, parseAbiParameters, toHex, keccak256, toBytes, createWalletClient, http, createPublicClient } from 'viem'
+import { SDK, SchemaEncoder } from '@somnia-chain/streams'
+import { createPublicClient, createWalletClient, http, defineChain, keccak256, toBytes, toHex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import dotenv from 'dotenv'
 
 dotenv.config()
 
 // Somnia chain configuration
-const somniaChain = {
-  id: 50312,
+const somniaChain = defineChain({
+  id: parseInt(process.env.SOMNIA_CHAIN_ID || process.env.CHAIN_ID || '50312'),
   name: 'Somnia Testnet',
   network: 'somnia-testnet',
   nativeCurrency: {
@@ -23,33 +23,25 @@ const somniaChain = {
       http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
   },
-}
+})
 
 export class GPSPublisher {
   constructor() {
-    this.devices = []
-    this.publishInterval = parseInt(process.env.PUBLISH_INTERVAL) || 5000
-    this.deviceCount = parseInt(process.env.DEVICE_COUNT) || 3
-    this.isPublishing = false
-    this.mockMode = process.env.MOCK_DATA === 'true'
-    this.schemaId = 'gps_location_v1' // Use the registered schema ID
     this.sdk = null
     this.account = null
-    this.publicClient = null
-    this.walletClient = null
+    this.devices = []
+    this.publishInterval = null
+    this.isPublishing = false
+    
+    // Initialize SchemaEncoder with GPS schema
+    const gpsSchema = 'bytes32 deviceId, uint64 timestamp, int256 latitude, int256 longitude, int256 altitude, uint256 speed'
+    this.schemaEncoder = new SchemaEncoder(gpsSchema)
   }
 
-  // Initialize SDK and clients
+  // Initialize SDK with proper Streams configuration
   async initializeSDK() {
     try {
-      if (this.mockMode) {
-        console.log('🔧 Initializing in Mock Mode (no blockchain interaction)...')
-        console.log('👤 Mock Account: 0x1234567890123456789012345678901234567890')
-        console.log('✅ Mock SDK initialized successfully')
-        return
-      }
-
-      console.log('🔧 Initializing Somnia SDK...')
+      console.log('🔧 Initializing Somnia Streams SDK...')
       
       // Create account from private key
       const privateKey = process.env.SOMNIA_PRIVATE_KEY || process.env.PRIVATE_KEY
@@ -60,272 +52,291 @@ export class GPSPublisher {
       this.account = privateKeyToAccount(privateKey)
       console.log(`👤 Account: ${this.account.address}`)
 
-      // Create clients
-      this.publicClient = createPublicClient({
+      // Create clients for Streams SDK
+      const publicClient = createPublicClient({
         chain: somniaChain,
         transport: http()
       })
 
-      this.walletClient = createWalletClient({
+      const walletClient = createWalletClient({
         account: this.account,
         chain: somniaChain,
         transport: http()
       })
 
-      // Initialize SDK
+      // Initialize Streams SDK with proper configuration
       this.sdk = new SDK({
-        account: this.account,
-        publicClient: this.publicClient,
-        walletClient: this.walletClient
+        public: publicClient,
+        wallet: walletClient
       })
 
-      console.log('✅ SDK initialized successfully')
+      console.log('✅ Somnia Streams SDK initialized successfully')
       
     } catch (error) {
-      console.error('❌ Failed to initialize SDK:', error)
+      console.error('❌ Failed to initialize Streams SDK:', error)
       throw error
     }
   }
 
   // Initialize GPS devices with starting locations
   initializeDevices() {
-    const deviceNames = [
-      'Delivery Truck Alpha',
-      'Fleet Vehicle Beta', 
-      'Service Van Gamma',
-      'Logistics Truck Delta',
-      'Emergency Vehicle Echo'
-    ]
-
-    // Starting locations (major cities)
-    const startingLocations = [
-      { lat: 40.7128, lon: -74.0060, name: 'New York' },
-      { lat: 34.0522, lon: -118.2437, name: 'Los Angeles' },
-      { lat: 41.8781, lon: -87.6298, name: 'Chicago' },
-      { lat: 29.7604, lon: -95.3698, name: 'Houston' },
-      { lat: 33.4484, lon: -112.0740, name: 'Phoenix' }
-    ]
-
-    for (let i = 0; i < this.deviceCount; i++) {
-      const location = startingLocations[i % startingLocations.length]
-      const deviceId = keccak256(toBytes(deviceNames[i]))
-      
-      this.devices.push({
-        id: deviceId,
-        name: deviceNames[i],
-        latitude: location.lat,
-        longitude: location.lon,
-        altitude: Math.random() * 100 + 50, // 50-150m altitude
-        speed: Math.random() * 80 + 20, // 20-100 km/h
-        direction: Math.random() * 360, // Random initial direction
+    this.devices = [
+      {
+        id: 'truck_alpha',
+        name: 'Delivery Truck Alpha',
+        lat: 40.7128,
+        lon: -74.0060,
+        altitude: 100,
+        speed: 45, // km/h base
+        heading: 90, // degrees (east)
         lastUpdate: Date.now()
-      })
-    }
+      },
+      {
+        id: 'vehicle_beta',
+        name: 'Fleet Vehicle Beta',
+        lat: 34.0522,
+        lon: -118.2437,
+        altitude: 105,
+        speed: 55,
+        heading: 45, // northeast
+        lastUpdate: Date.now()
+      },
+      {
+        id: 'van_gamma',
+        name: 'Service Van Gamma',
+        lat: 41.8781,
+        lon: -87.6298,
+        altitude: 50,
+        speed: 35,
+        heading: 180, // south
+        lastUpdate: Date.now()
+      }
+    ]
 
     console.log(`📍 Initialized ${this.devices.length} GPS devices`)
     this.devices.forEach(device => {
-      console.log(`  • ${device.name}: ${device.latitude.toFixed(4)}, ${device.longitude.toFixed(4)}`)
+      console.log(`  • ${device.name}: ${device.lat}, ${device.lon}`)
     })
   }
 
-  // Simulate realistic GPS movement
-  updateDeviceLocations() {
-    this.devices.forEach(device => {
-      // Simulate movement (small random changes)
-      const speedKmh = device.speed
-      const speedMs = speedKmh / 3.6 // Convert to m/s
-      const timeElapsed = (Date.now() - device.lastUpdate) / 1000 // seconds
-      
-      // Calculate distance moved
-      const distanceM = speedMs * timeElapsed
-      
-      // Convert to lat/lon changes (approximate)
-      const latChange = (distanceM * Math.cos(device.direction * Math.PI / 180)) / 111000
-      const lonChange = (distanceM * Math.sin(device.direction * Math.PI / 180)) / (111000 * Math.cos(device.latitude * Math.PI / 180))
-      
-      // Update position
-      device.latitude += latChange
-      device.longitude += lonChange
-      
-      // Randomly adjust direction and speed
-      device.direction += (Math.random() - 0.5) * 30 // ±15 degree change
-      device.speed += (Math.random() - 0.5) * 10 // ±5 km/h change
-      device.speed = Math.max(10, Math.min(120, device.speed)) // Keep speed reasonable
-      
-      // Slight altitude variation
-      device.altitude += (Math.random() - 0.5) * 5
-      device.altitude = Math.max(0, Math.min(500, device.altitude))
-      
-      device.lastUpdate = Date.now()
-    })
+  // Simulate realistic GPS movement (heading + speed)
+  simulateMovement(device) {
+    const now = Date.now()
+    const timeDeltaSec = (now - device.lastUpdate) / 1000
+    if (timeDeltaSec <= 0) return device
+
+    // Vary speed around a reasonable base, clamp 5–120 km/h
+    const speedVariation = (Math.random() - 0.5) * 10 // ±5 km/h
+    const targetSpeed = Math.max(5, Math.min(120, device.speed + speedVariation))
+
+    // Slightly drift heading
+    const headingDrift = (Math.random() - 0.5) * 4 // ±2 degrees
+    device.heading = (device.heading + headingDrift + 360) % 360
+
+    // Convert speed to distance over the interval
+    const distanceKm = targetSpeed * (timeDeltaSec / 3600)
+
+    // Convert to lat/lon deltas
+    const latRadians = device.lat * Math.PI / 180
+    const kmPerDegLat = 111.32
+    const kmPerDegLon = 111.32 * Math.cos(latRadians)
+    const headingRad = device.heading * Math.PI / 180
+
+    const dLatDeg = (distanceKm * Math.cos(headingRad)) / kmPerDegLat
+    const dLonDeg = kmPerDegLon === 0 ? 0 : (distanceKm * Math.sin(headingRad)) / kmPerDegLon
+
+    device.lat += dLatDeg
+    device.lon += dLonDeg
+    device.speed = Math.round(targetSpeed)
+    device.altitude += Math.round((Math.random() - 0.5) * 4) // small ±2m variation
+    device.lastUpdate = now
+
+    return device
   }
 
-  // Create GPS data event for blockchain
-  createGPSEvent(device) {
-    const timestamp = BigInt(Math.floor(Date.now() / 1000))
-    const latitude = BigInt(Math.floor(device.latitude * 1000000)) // 6 decimal precision
-    const longitude = BigInt(Math.floor(device.longitude * 1000000))
-    const altitude = BigInt(Math.floor(device.altitude))
-    const speed = BigInt(Math.floor(device.speed))
-
-    // Create event data that can be emitted as a blockchain event
+  // Create GPS data for publishing
+  createGPSData(device) {
+    const timestamp = Math.floor(Date.now() / 1000) // Unix timestamp
+    
+    // Convert device ID to bytes32 format as required by schema
+    const deviceId = toHex(device.id, { size: 32 })
+    
+    // Convert coordinates to fixed-point integers (multiply by 1,000,000 for precision)
+    const latitude = Math.round(device.lat * 1000000)
+    const longitude = Math.round(device.lon * 1000000)
+    
     return {
-      deviceId: device.id,
-      timestamp,
-      latitude,
-      longitude,
-      altitude,
-      speed,
-      deviceName: device.name
+      deviceId: deviceId,           // bytes32 format
+      timestamp: BigInt(timestamp), // uint64 as BigInt
+      latitude: BigInt(latitude),   // int256 as BigInt
+      longitude: BigInt(longitude), // int256 as BigInt
+      altitude: BigInt(device.altitude), // int256 as BigInt
+      speed: BigInt(device.speed)   // uint256 as BigInt
     }
   }
 
-  // Publish GPS data using blockchain transactions
-  async publishGPSData() {
-    if (!this.isPublishing) return
-
+  // Publish GPS data using Streams API
+  async publishGPSData(device) {
     try {
-      this.updateDeviceLocations()
+      // Simulate movement
+      this.simulateMovement(device)
       
-      // Create GPS events for each device
-      const gpsEvents = this.devices.map(device => this.createGPSEvent(device))
+      // Create GPS data
+      const gpsData = this.createGPSData(device)
       
-      if (this.mockMode) {
-        // Mock mode - just log the data without blockchain interaction
-        for (const event of gpsEvents) {
-          const mockHash = `0x${Math.random().toString(16).substr(2, 8)}`
-          console.log(`📡 [MOCK] Published GPS data for ${event.deviceName} (tx: ${mockHash}...)`)
-          console.log(`  📍 Location: ${(Number(event.latitude) / 1000000).toFixed(6)}, ${(Number(event.longitude) / 1000000).toFixed(6)}`)
-          console.log(`  🚗 Speed: ${Number(event.speed)} km/h, Altitude: ${Number(event.altitude)}m`)
-        }
-        return
-      }
-      
-      // Real blockchain mode - use transaction-based publishing with registered schema
-      console.log(`📋 Using registered schema: ${this.schemaId}`)
-      
-      for (const event of gpsEvents) {
-        try {
-          // Debug: Log the raw values being encoded
-          console.log(`🔍 DEBUG - Encoding values for ${event.deviceName}:`)
-          console.log(`  deviceId: ${event.deviceId}`)
-          console.log(`  timestamp: ${event.timestamp}`)
-          console.log(`  latitude (raw): ${event.latitude}`)
-          console.log(`  longitude (raw): ${event.longitude}`)
-          console.log(`  altitude: ${event.altitude}`)
-          console.log(`  speed: ${event.speed}`)
-          
-          // TEST: Use simple hardcoded values to debug encoding
-          const testDeviceId = '0x1234567890123456789012345678901234567890123456789012345678901234'
-          const testTimestamp = BigInt(1640995200) // 2022-01-01 00:00:00
-          const testLatitude = BigInt(40681110) // 40.681110 * 1000000
-          const testLongitude = BigInt(-74005353) // -74.005353 * 1000000
-          const testAltitude = BigInt(131)
-          const testSpeed = BigInt(55)
-          
-          console.log(`🧪 TEST - Using hardcoded values:`)
-          console.log(`  deviceId: ${testDeviceId}`)
-          console.log(`  timestamp: ${testTimestamp}`)
-          console.log(`  latitude: ${testLatitude}`)
-          console.log(`  longitude: ${testLongitude}`)
-          console.log(`  altitude: ${testAltitude}`)
-          console.log(`  speed: ${testSpeed}`)
-          
-          // Encode GPS data using the registered schema format
-          const gpsData = encodeAbiParameters(
-            parseAbiParameters('bytes32, uint64, int256, int256, int256, uint256'),
-            [testDeviceId, testTimestamp, testLatitude, testLongitude, testAltitude, testSpeed]
-          )
-          
-          // Publish data via blockchain transaction using a simple contract call approach
-          const hash = await this.walletClient.sendTransaction({
-            account: this.account,
-            to: this.account.address, // Send to self
-            data: gpsData,
-            value: 0n,
-            gas: 100000n, // Fixed gas limit
-            gasPrice: 10000000000n, // 10 gwei
-            type: 'legacy' // Use legacy transaction format
-          })
-          
-          console.log(`📡 Published GPS data for ${event.deviceName} to blockchain (tx: ${hash.slice(0, 10)}...)`)
-          console.log(`  📍 Location: ${(Number(event.latitude) / 1000000).toFixed(6)}, ${(Number(event.longitude) / 1000000).toFixed(6)}`)
-          console.log(`  🚗 Speed: ${Number(event.speed)} km/h, Altitude: ${Number(event.altitude)}m`)
-          console.log(`  📋 Schema: ${this.schemaId}`)
-          
-        } catch (publishError) {
-          console.error(`❌ Failed to publish data for ${event.deviceName}:`, publishError.message)
-        }
-      }
+      // Generate bytes32 data ID using keccak256 hash (SDK requires bytes32)
+      const dataId = keccak256(toBytes(`${device.id}_${gpsData.timestamp}`))
 
+      console.log(`🔍 Publishing GPS data for ${device.name}:`)
+      console.log(`  📍 Location: ${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`)
+      console.log(`  🚗 Speed: ${device.speed} km/h, Altitude: ${device.altitude}m`)
+      console.log(`  🆔 Data ID: ${dataId}`)
+
+      // Generate the bytes32 schema ID using keccak256 hash (SDK requires bytes32)
+      // Align with registered schema id defined in schemas.js: 'gps_location'
+      const schemaId = keccak256(toBytes('gps_location'))
+      
+      console.log(`  🔍 Schema ID (bytes32): ${schemaId}`)
+      console.log(`  📊 GPS Data structure:`, JSON.stringify(gpsData, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value, 2))
+
+      // Encode the GPS data using SchemaEncoder
+      const encodedData = this.schemaEncoder.encodeData([
+        { name: "deviceId", value: gpsData.deviceId, type: "bytes32" },
+        { name: "timestamp", value: gpsData.timestamp.toString(), type: "uint64" },
+        { name: "latitude", value: gpsData.latitude.toString(), type: "int256" },
+        { name: "longitude", value: gpsData.longitude.toString(), type: "int256" },
+        { name: "altitude", value: gpsData.altitude.toString(), type: "int256" },
+        { name: "speed", value: gpsData.speed.toString(), type: "uint256" }
+      ])
+
+      console.log(`  🔐 Encoded data (hex): ${encodedData}`)
+
+      // Publish using set method with properly encoded data
+      const result = await this.sdk.streams.set([{
+        id: dataId,
+        schemaId: schemaId,  // Use bytes32 format
+        data: encodedData    // Use encoded hex data instead of raw object
+      }])
+
+      console.log(`✅ GPS data published successfully for ${device.name}`)
+      console.log(`📋 Transaction result:`, result)
+      
+      return result
+      
     } catch (error) {
-      console.error('❌ Failed to publish GPS data:', error)
+      console.error(`❌ Failed to publish GPS data for ${device.name}:`, error.message)
+      
+      // Log additional debug information
+      if (error.message.includes('schema')) {
+        console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema')
+      }
+      
+      throw new Error(`Failed to publish data for ${device.name}: ${error.message}`)
     }
   }
 
   // Start publishing GPS data
   async startPublishing() {
-    try {
-      console.log('🚀 Starting GPS Publisher...')
-      
-      // Initialize SDK and clients
-      await this.initializeSDK()
-      
-      // Initialize devices
-      this.initializeDevices()
-      
-      // Start publishing loop
-      this.isPublishing = true
-      console.log(`📡 Publishing GPS data every ${this.publishInterval}ms`)
-      
-      // Publish immediately, then on interval
-      await this.publishGPSData()
-      this.publishTimer = setInterval(() => {
-        this.publishGPSData()
-      }, this.publishInterval)
-      
-    } catch (error) {
-      console.error('❌ Failed to start GPS publisher:', error)
-      throw error
+    if (this.isPublishing) {
+      console.log('⚠️ GPS Publisher is already running')
+      return
     }
+
+    const publishIntervalMs = parseInt(process.env.PUBLISH_INTERVAL_MS || '5000')
+    console.log(`📡 Publishing GPS data via Streams API every ${publishIntervalMs}ms`)
+    console.log(`📋 Publishing GPS data using Streams API with schema: gps_location`)
+
+    this.isPublishing = true
+    
+    // Publish data for all devices
+    const publishAllDevices = async () => {
+      if (!this.isPublishing) return
+      
+      for (const device of this.devices) {
+        try {
+          await this.publishGPSData(device)
+          // Small delay between device publications
+          await new Promise(resolve => setTimeout(resolve, 100))
+        } catch (error) {
+          console.error(`❌ Failed to publish data for ${device.name}:`, error.message)
+        }
+      }
+    }
+
+    // Initial publication
+    await publishAllDevices()
+    
+    // Set up interval for continuous publishing
+    this.publishInterval = setInterval(publishAllDevices, publishIntervalMs)
+    
+    console.log('✅ GPS Publisher started successfully')
+    console.log('📊 Monitor the visualizer at http://localhost:3001 to see live GPS data')
   }
 
-  // Stop publishing
+  // Stop publishing GPS data
   stopPublishing() {
-    this.isPublishing = false
-    if (this.publishTimer) {
-      clearInterval(this.publishTimer)
-      this.publishTimer = null
+    if (this.publishInterval) {
+      clearInterval(this.publishInterval)
+      this.publishInterval = null
     }
+    this.isPublishing = false
     console.log('🛑 GPS Publisher stopped')
+  }
+
+  // Get current device status
+  getDeviceStatus() {
+    return this.devices.map(device => ({
+      id: device.id,
+      name: device.name,
+      location: {
+        lat: device.lat,
+        lon: device.lon,
+        altitude: device.altitude
+      },
+      speed: device.speed,
+      lastUpdate: device.lastUpdate,
+      isActive: this.isPublishing
+    }))
   }
 }
 
 // Main execution
 async function main() {
-  // Validate environment variables
-  if (!process.env.SOMNIA_PRIVATE_KEY && !process.env.PRIVATE_KEY) {
-    throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
-  }
-  if (!process.env.SOMNIA_RPC_URL && !process.env.RPC_URL) {
-    throw new Error('SOMNIA_RPC_URL (or RPC_URL) not found in environment variables')
-  }
-
   const publisher = new GPSPublisher()
   
-  // Graceful shutdown handling
-  process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down GPS Publisher...')
-    publisher.stopPublishing()
-    process.exit(0)
-  })
-
   try {
+    console.log('🚀 Starting GPS Publisher with Streams API...')
+    
+    // Initialize Streams SDK
+    await publisher.initializeSDK()
+    
+    // Initialize GPS devices
+    publisher.initializeDevices()
+    
+    // Start publishing GPS data
     await publisher.startPublishing()
+    
+    // Handle graceful shutdown
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Shutting down GPS Publisher...')
+      publisher.stopPublishing()
+      process.exit(0)
+    })
+    
+    process.on('SIGTERM', () => {
+      console.log('\n🛑 Shutting down GPS Publisher...')
+      publisher.stopPublishing()
+      process.exit(0)
+    })
+    
   } catch (error) {
-    console.error('❌ GPS Publisher failed:', error)
+    console.error('❌ GPS Publisher failed to start:', error)
     process.exit(1)
   }
 }
 
-main()
+// Run if this file is executed directly
+if (import.meta.url.toLowerCase() === `file:///${process.argv[1].replace(/\\/g, '/')}`.toLowerCase()) {
+  main()
+}

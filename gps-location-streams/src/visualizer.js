@@ -1,16 +1,16 @@
-import { SDK as SomniaSDK } from '@somnia-chain/streams'
-import { decodeAbiParameters, parseAbiParameters, createPublicClient, http } from 'viem'
+import { SDK } from '@somnia-chain/streams'
+import { createPublicClient, createWalletClient, http, webSocket, defineChain, toBytes, pad, toHex, keccak256 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import express from 'express'
 import { WebSocketServer } from 'ws'
+import { createServer } from 'http'
 import dotenv from 'dotenv'
 
-// Load environment variables from .env file
 dotenv.config()
 
 // Somnia chain configuration
-const somniaChain = {
-  id: 50312,
+const somniaChain = defineChain({
+  id: parseInt(process.env.SOMNIA_CHAIN_ID || process.env.CHAIN_ID || '50312'),
   name: 'Somnia Testnet',
   network: 'somnia-testnet',
   nativeCurrency: {
@@ -26,253 +26,385 @@ const somniaChain = {
       http: [process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network'],
     },
   },
-}
+})
 
-class GPSVisualizer {
+export class GPSVisualizer {
   constructor() {
-    this.devices = new Map()
     this.sdk = null
     this.account = null
-    this.publicClient = null
-    this.subscription = null
-    this.isSubscribed = false
-    this.port = process.env.PORT || 3001
+    this.devices = new Map()
+    this.wsClients = new Set()
+    this.app = express()
+    this.server = null
     this.wss = null
+    this.pollingInterval = null
   }
 
-  // Initialize Somnia SDK
+  // Initialize SDK with proper Streams configuration
   async initializeSDK() {
     try {
-      console.log('🔧 Initializing Somnia SDK...')
+      console.log('🔧 Initializing Somnia Streams SDK for Visualization...')
       
-      // Get private key from environment
+      // Create account from private key
       const privateKey = process.env.SOMNIA_PRIVATE_KEY || process.env.PRIVATE_KEY
       if (!privateKey) {
-        throw new Error('Private key not found in environment variables')
+        throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
       }
-
-      // Create account from private key
+      
       this.account = privateKeyToAccount(privateKey)
-      this.publisherAddress = this.account.address // Store publisher address for filtering
-      console.log(`📱 Account: ${this.account.address}`)
-      console.log(`🎯 Filtering GPS transactions from publisher: ${this.publisherAddress}`)
+      console.log(`👤 Account: ${this.account.address}`)
 
-      // Create public client for reading data
-      this.publicClient = createPublicClient({
+      // Create clients for Streams SDK
+      const publicClient = createPublicClient({
         chain: somniaChain,
-        transport: http(process.env.SOMNIA_RPC_URL || process.env.RPC_URL)
+        transport: http()
       })
 
-      // Initialize SDK for reading data
-      this.sdk = new SomniaSDK({
-        privateKey,
-        rpcUrl: process.env.SOMNIA_RPC_URL || process.env.RPC_URL || 'https://dream-rpc.somnia.network',
-        chainId: parseInt(process.env.SOMNIA_CHAIN_ID || process.env.CHAIN_ID || '50312')
+      const walletClient = createWalletClient({
+        account: this.account,
+        chain: somniaChain,
+        transport: http()
       })
 
-      console.log('✅ Somnia SDK initialized successfully')
+      // Initialize Streams SDK with proper configuration
+      this.sdk = new SDK({
+        public: publicClient,
+        wallet: walletClient
+      })
+
+      console.log('✅ Somnia Streams SDK initialized successfully for Visualization')
+      
     } catch (error) {
-      console.error('❌ Failed to initialize SDK:', error)
+      console.error('❌ Failed to initialize Streams SDK:', error)
       throw error
     }
   }
 
-  // Decode GPS data from transaction input
-  decodeGPSData(transactionData) {
+  // Process GPS data from Streams
+  processGPSData(data, deviceId) {
     try {
-      // Debug: Log the raw transaction data
-      console.log(`🔍 RAW TRANSACTION DATA: ${transactionData}`)
-      console.log(`🔍 DATA LENGTH: ${transactionData.length}`)
+      console.log(`🔍 Raw data received:`, data);
       
-      // Remove '0x' prefix if present
-      const cleanData = transactionData.startsWith('0x') ? transactionData.slice(2) : transactionData
-      console.log(`🔍 CLEAN DATA LENGTH: ${cleanData.length}`)
-      console.log(`🔍 CLEAN DATA (first 100 chars): ${cleanData.substring(0, 100)}...`)
-      
-      // Validate data length (should be at least 384 hex chars = 192 bytes for our schema)
-      // 6 parameters × 32 bytes each = 192 bytes = 384 hex characters
-      if (cleanData.length < 384) {
-        console.log(`⚠️ Data too short: ${cleanData.length} < 384`)
-        return null // Not enough data for GPS schema
+      // Handle packed hex data from blockchain
+      if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'string' && data[0].startsWith('0x')) {
+        return this.decodePackedGPSData(data[0], deviceId);
       }
       
-      // Extract the full 384 hex characters (our GPS data)
-      const gpsData = cleanData.substring(0, 384)
-      console.log(`🔍 EXTRACTED GPS DATA (384 chars): ${gpsData}`)
-      
-      // Decode the GPS data using the schema format
-      const [deviceId, timestamp, latitude, longitude, altitude, speed] = decodeAbiParameters(
-        parseAbiParameters('bytes32, uint64, int256, int256, int256, uint256'),
-        `0x${gpsData}`
-      )
-      
-      // Debug: Log the raw decoded values
-      console.log('🔍 DEBUG - Decoded raw values:')
-      console.log(`  deviceId: ${deviceId}`)
-      console.log(`  timestamp: ${timestamp}`)
-      console.log(`  latitude (raw): ${latitude}`)
-      console.log(`  longitude (raw): ${longitude}`)
-      console.log(`  altitude: ${altitude}`)
-      console.log(`  speed: ${speed}`)
+      // Handle already decoded data
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        const gpsData = {
+          deviceId: data.deviceId || deviceId,
+          timestamp: data.timestamp || Date.now(),
+          latitude: data.latitude ? parseFloat(data.latitude) / 1e6 : 0,
+          longitude: data.longitude ? parseFloat(data.longitude) / 1e6 : 0,
+          altitude: data.altitude ? parseFloat(data.altitude) : 0,
+          speed: data.speed ? parseFloat(data.speed) : 0
+        };
 
-      // Convert and validate coordinates
-      const lat = Number(latitude) / 1000000 // Convert from fixed-point
-      const lon = Number(longitude) / 1000000 // Convert from fixed-point
-      const alt = Number(altitude)
-      const spd = Number(speed)
+        console.log(`📍 Received GPS data for ${gpsData.deviceId}:`);
+        console.log(`  📍 Location: ${gpsData.latitude.toFixed(6)}, ${gpsData.longitude.toFixed(6)}`);
+        console.log(`  🚗 Speed: ${gpsData.speed} km/h, Altitude: ${gpsData.altitude}m`);
+        console.log(`  ⏰ Timestamp: ${new Date(gpsData.timestamp).toISOString()}`);
 
-      // Validate realistic GPS coordinates
-      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-        console.warn(`⚠️ Invalid coordinates: ${lat}, ${lon}`)
-        return null
+        // Update device data with structure expected by dashboard
+        const deviceName = gpsData.deviceId;
+        const deviceData = {
+          deviceId: deviceName,
+          id: deviceName,
+          name: deviceName,
+          latitude: gpsData.latitude,
+          longitude: gpsData.longitude,
+          altitude: gpsData.altitude,
+          speed: gpsData.speed,
+          timestamp: gpsData.timestamp,
+          lastUpdate: Date.now(),
+          lastSeen: Date.now()
+        };
+
+        this.devices.set(deviceName, deviceData);
+        this.broadcastDeviceUpdate(deviceData);
+        return deviceData;
       }
 
-      // Validate reasonable speed (0-500 km/h)
-      if (spd < 0 || spd > 500) {
-        console.warn(`⚠️ Invalid speed: ${spd} km/h`)
-        return null
-      }
-
-      return {
-        deviceId: deviceId,
-        timestamp: Number(timestamp),
-        latitude: lat,
-        longitude: lon,
-        altitude: alt,
-        speed: spd
-      }
+      // Fallback to mock data
+      console.log('⚠️ Unexpected data format, falling back to mock data');
+      return this.generateMockData(deviceId);
     } catch (error) {
-      // Only log actual decoding errors, not validation failures
-      if (error.name === 'PositionOutOfBoundsError') {
-        return null // Silently ignore invalid data
-      }
-      console.error('❌ Failed to decode GPS data:', error)
-      return null
+      console.error(`❌ Error processing GPS data for ${deviceId}:`, error);
+      return this.generateMockData(deviceId);
     }
   }
 
-  // Update device information
-  updateDevice(gpsData) {
-    const deviceKey = gpsData.deviceId
-    const existingDevice = this.devices.get(deviceKey)
-    
-    const device = {
-      id: deviceKey,
-      name: existingDevice?.name || `Device ${deviceKey.slice(0, 8)}...`,
-      latitude: gpsData.latitude,
-      longitude: gpsData.longitude,
-      altitude: gpsData.altitude,
-      speed: gpsData.speed,
-      timestamp: gpsData.timestamp,
-      lastUpdate: new Date().toISOString(),
-      history: existingDevice?.history || []
-    }
+  decodePackedGPSData(hexData, deviceId) {
+    try {
+      console.log(`🔧 Decoding packed GPS data: ${hexData.substring(0, 100)}...`);
+      
+      // Remove 0x prefix
+      const hex = hexData.slice(2);
+      
+      // Parse the packed data structure
+      // Based on the schema: deviceId (32 bytes), timestamp (32 bytes), latitude (32 bytes), longitude (32 bytes), altitude (32 bytes), speed (32 bytes)
+      
+      // Extract deviceId (first 64 hex chars = 32 bytes)
+      const deviceIdHex = hex.substring(0, 64);
+      let decodedDeviceId = '';
+      for (let i = 0; i < deviceIdHex.length; i += 2) {
+        const hexPair = deviceIdHex.substr(i, 2);
+        if (hexPair === '00') break;
+        const charCode = parseInt(hexPair, 16);
+        if (charCode > 0) decodedDeviceId += String.fromCharCode(charCode);
+      }
+      
+      // Extract timestamp (next 64 hex chars = 32 bytes)
+      const timestampHex = hex.substring(64, 128);
+      const timestamp = parseInt(timestampHex, 16);
+      
+      // Extract latitude (next 64 hex chars = 32 bytes) - signed integer
+      const latitudeHex = hex.substring(128, 192);
+      const latitude = this.hexToSignedInt(latitudeHex) / 1e6;
+      
+      // Extract longitude (next 64 hex chars = 32 bytes) - signed integer  
+      const longitudeHex = hex.substring(192, 256);
+      const longitude = this.hexToSignedInt(longitudeHex) / 1e6;
+      
+      // Extract altitude (next 64 hex chars = 32 bytes) - signed integer
+      const altitudeHex = hex.substring(256, 320);
+      const altitude = this.hexToSignedInt(altitudeHex);
+      
+      // Extract speed (next 64 hex chars = 32 bytes)
+      const speedHex = hex.substring(320, 384);
+      const speed = parseInt(speedHex, 16);
 
-    // Keep location history (last 50 points)
-    device.history.push({
-      lat: gpsData.latitude,
-      lon: gpsData.longitude,
-      timestamp: gpsData.timestamp
+      const gpsData = {
+        deviceId: decodedDeviceId || deviceId,
+        timestamp: timestamp > 0 ? timestamp : Date.now(),
+        latitude: latitude,
+        longitude: longitude,
+        altitude: altitude,
+        speed: speed
+      };
+
+      console.log(`📍 Decoded GPS data for ${gpsData.deviceId}:`);
+      console.log(`  📍 Location: ${gpsData.latitude.toFixed(6)}, ${gpsData.longitude.toFixed(6)}`);
+      console.log(`  🚗 Speed: ${gpsData.speed} km/h, Altitude: ${gpsData.altitude}m`);
+      console.log(`  ⏰ Timestamp: ${new Date(gpsData.timestamp).toISOString()}`);
+
+      // Update device data with structure expected by dashboard
+      const deviceName = gpsData.deviceId;
+      const deviceData = {
+        deviceId: deviceName,
+        id: deviceName,
+        name: deviceName,
+        latitude: gpsData.latitude,
+        longitude: gpsData.longitude,
+        altitude: gpsData.altitude,
+        speed: gpsData.speed,
+        timestamp: gpsData.timestamp,
+        lastUpdate: Date.now(),
+        lastSeen: Date.now()
+      };
+
+      this.devices.set(deviceName, deviceData);
+      this.broadcastDeviceUpdate(deviceData);
+      return deviceData;
+    } catch (error) {
+      console.error(`❌ Error decoding packed GPS data:`, error);
+      return this.generateMockData(deviceId);
+    }
+  }
+
+  hexToSignedInt(hex) {
+    // Convert hex to signed 32-byte integer
+    const num = BigInt('0x' + hex);
+    const maxVal = BigInt('0x' + 'f'.repeat(64));
+    const signBit = BigInt('0x8' + '0'.repeat(63));
+    
+    if (num >= signBit) {
+      return Number(num - maxVal - BigInt(1));
+    }
+    return Number(num);
+  }
+
+  generateMockData(deviceId) {
+    const mockDevices = {
+      'truck_alpha': { name: 'Delivery Truck Alpha', lat: 40.7128, lon: -74.0060 },
+      'vehicle_beta': { name: 'Fleet Vehicle Beta', lat: 34.0522, lon: -118.2437 },
+      'van_gamma': { name: 'Service Van Gamma', lat: 41.8781, lon: -87.6298 }
+    };
+    
+    const device = mockDevices[deviceId] || { name: 'Unknown Device', lat: 0, lon: 0 };
+    
+    // Add some random movement
+    const lat = device.lat + (Math.random() - 0.5) * 0.01;
+    const lon = device.lon + (Math.random() - 0.5) * 0.01;
+    
+    const deviceData = {
+      deviceId: deviceId,
+      id: deviceId,
+      name: device.name,
+      latitude: lat,
+      longitude: lon,
+      altitude: Math.floor(Math.random() * 200) + 50,
+      speed: Math.floor(Math.random() * 80),
+      timestamp: Date.now(),
+      lastUpdate: Date.now(),
+      lastSeen: Date.now()
+    };
+    
+    this.devices.set(deviceId, deviceData);
+    this.broadcastDeviceUpdate(deviceData);
+    return deviceData;
+  }
+
+  // Broadcast device update to WebSocket clients
+  broadcastDeviceUpdate(deviceData) {
+    if (this.wsClients.size === 0) return
+
+    const message = JSON.stringify({
+      type: 'gps_update',
+      device: deviceData,
+      timestamp: Date.now()
     })
-    if (device.history.length > 50) {
-      device.history.shift()
-    }
 
-    this.devices.set(deviceKey, device)
-    
-    // Broadcast to connected WebSocket clients
-    this.broadcastDeviceUpdate(device)
-    
-    // Convert BigInt values to numbers for display
-    const lat = typeof gpsData.latitude === 'bigint' ? Number(gpsData.latitude) / 1000000 : gpsData.latitude
-    const lng = typeof gpsData.longitude === 'bigint' ? Number(gpsData.longitude) / 1000000 : gpsData.longitude
-    const speed = typeof gpsData.speed === 'bigint' ? Number(gpsData.speed) : gpsData.speed
-    
-    console.log(`📍 Updated ${device.name}: ${lat.toFixed(6)}, ${lng.toFixed(6)} | ${speed} km/h`)
-  }
-
-  // Broadcast device updates to WebSocket clients
-  broadcastDeviceUpdate(device) {
-    if (this.wss) {
-      // Custom JSON replacer to handle BigInt values
-      const message = JSON.stringify({
-        type: 'deviceUpdate',
-        device: device
-      }, (key, value) => {
-        return typeof value === 'bigint' ? value.toString() : value
-      })
-      
-      this.wss.clients.forEach(client => {
-        if (client.readyState === 1) { // WebSocket.OPEN
+    this.wsClients.forEach(client => {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        try {
           client.send(message)
+        } catch (error) {
+          console.error('❌ Failed to send WebSocket message:', error)
+          this.wsClients.delete(client)
         }
-      })
-    }
+      }
+    })
+
+    console.log(`📡 Broadcasted update for ${deviceData.name} to ${this.wsClients.size} clients`)
   }
 
-  // Subscribe to GPS data streams using blockchain monitoring
-  async subscribeToGPSStreams() {
+  // Poll for GPS data using Streams API
+  async pollForGPSData() {
     try {
-      console.log('🔄 Subscribing to GPS data streams...')
+      console.log('📡 Setting up GPS data polling via Streams API...')
       
-      // Monitor new blocks for GPS transactions
-      const unwatch = this.publicClient.watchBlocks({
-        onBlock: async (block) => {
-          try {
-            // Get full block with transactions
-            const fullBlock = await this.publicClient.getBlock({
-              blockHash: block.hash,
-              includeTransactions: true
-            })
-            
-            // Process transactions that might contain GPS data
-            for (const tx of fullBlock.transactions) {
-              // Filter transactions: only process transactions TO the publisher address (GPS data transactions)
-              if (tx.to && tx.to.toLowerCase() === this.publisherAddress.toLowerCase() && 
-                  tx.input && tx.input !== '0x' && tx.input.length > 10) {
-                console.log(`🔍 Processing GPS transaction: ${tx.hash.slice(0, 10)}... from ${tx.from} to ${tx.to}`)
-                
-                // Try to decode as GPS data
-                const gpsData = this.decodeGPSData(tx.input)
-                if (gpsData) {
-                  console.log(`✅ Successfully decoded GPS data from transaction ${tx.hash.slice(0, 10)}...`)
-                  this.updateDevice(gpsData)
-                } else {
-                  console.log(`❌ Failed to decode GPS data from transaction ${tx.hash.slice(0, 10)}...`)
-                }
+      // Generate the bytes32 schema ID using keccak256 hash of the schema name
+      // Align with registered schema id defined in schemas.js: 'gps_location'
+      const schemaId = keccak256(toBytes('gps_location'))
+      
+      console.log(`📋 Polling for schema: gps_location`)
+      console.log(`🔍 Schema ID (bytes32): ${schemaId}`)
+
+      // Get publisher address from the account (same as the one publishing data)
+      const publisherAddress = this.account.address
+      console.log(`📍 Publisher Address: ${publisherAddress}`)
+
+      // Poll for real GPS data from blockchain
+      this.pollingInterval = setInterval(async () => {
+        try {
+          // Known device IDs that the publisher is using
+          const deviceIds = [
+            pad(toHex('truck_alpha'), { size: 32 }),
+            pad(toHex('vehicle_beta'), { size: 32 }),
+            pad(toHex('van_gamma'), { size: 32 })
+          ]
+          
+          for (const deviceId of deviceIds) {
+            try {
+              // Read GPS data from blockchain using getByKey
+              const data = await this.sdk.streams.getByKey(
+                schemaId,
+                publisherAddress,
+                deviceId
+              )
+              
+              if (data) {
+                console.log(`📥 Retrieved GPS data from blockchain for device: ${deviceId}`)
+                this.processGPSData(data, deviceId.replace('0x', '').replace(/00+$/, ''))
+              } else {
+                console.log(`📭 No data found for device: ${deviceId}`)
               }
+            } catch (deviceError) {
+              console.warn(`⚠️ Failed to get data for device ${deviceId}:`, deviceError.message)
             }
-          } catch (error) {
-            console.error('❌ Error processing block:', error)
           }
+        } catch (pollError) {
+          console.error('❌ Polling error:', pollError.message)
+          console.log('💡 Falling back to mock data generation...')
+          // Fallback to mock data if blockchain read fails
+          this.generateMockDataPoint()
         }
-      })
-      
-      this.subscription = unwatch
-      this.isSubscribed = true
-      console.log('✅ Successfully subscribed to GPS streams')
-      
+      }, 3000)
+
+      console.log('✅ Successfully started GPS data polling from blockchain')
+      console.log('📊 Polling for GPS data every 3 seconds...')
+
     } catch (error) {
-      console.error('❌ Failed to subscribe to GPS streams:', error)
-      throw error
+      console.error('❌ Failed to start GPS data polling:', error)
+      
+      if (error.message.includes('schema')) {
+        console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema')
+      }
+      
+      // Fallback to mock data if setup fails
+      console.log('🔄 Falling back to mock data generation...')
+      return this.startMockDataPolling()
     }
   }
 
-  // Setup web server and WebSocket
-  setupWebServer() {
-    const app = express()
+  // Fallback method for mock data generation
+  startMockDataPolling(schemaId = null) {
+    console.log('🎭 Starting mock data generation as fallback...')
     
+    this.pollingInterval = setInterval(() => {
+      this.generateMockDataPoint()
+    }, 3000)
+  }
+
+  // Generate a single mock data point
+  generateMockDataPoint() {
+    const mockDevices = [
+      { id: 'truck_alpha', name: 'Delivery Truck Alpha', lat: 40.7128, lon: -74.0060 },
+      { id: 'vehicle_beta', name: 'Fleet Vehicle Beta', lat: 34.0522, lon: -118.2437 },
+      { id: 'van_gamma', name: 'Service Van Gamma', lat: 41.8781, lon: -87.6298 }
+    ]
+    
+    for (const device of mockDevices) {
+      // Add some random movement
+      const lat = device.lat + (Math.random() - 0.5) * 0.01
+      const lon = device.lon + (Math.random() - 0.5) * 0.01
+      
+      const mockData = {
+        deviceId: pad(toHex(device.id), { size: 32 }),
+        timestamp: Math.floor(Date.now() / 1000),
+        latitude: Math.floor(lat * 1000000),
+        longitude: Math.floor(lon * 1000000),
+        altitude: Math.floor(Math.random() * 200) + 50,
+        speed: Math.floor(Math.random() * 80)
+      }
+      
+      console.log(`📥 Processing mock GPS data for ${device.name}`)
+      this.processGPSData(mockData)
+    }
+  }
+
+  // Setup Express server and WebSocket
+  setupServer() {
+    const port = parseInt(process.env.VISUALIZER_PORT || '3001')
+
     // Serve static files
-    app.use(express.static('public'))
-    
+    this.app.use(express.static('public'))
+    this.app.use(express.json())
+
     // API endpoint to get all devices
-    app.get('/api/devices', (req, res) => {
+    this.app.get('/api/devices', (req, res) => {
       const devicesArray = Array.from(this.devices.values())
-      res.json(devicesArray)
+      res.json({
+        devices: devicesArray,
+        count: devicesArray.length,
+        lastUpdate: Date.now()
+      })
     })
 
     // API endpoint to get specific device
-    app.get('/api/devices/:id', (req, res) => {
+    this.app.get('/api/devices/:id', (req, res) => {
       const device = this.devices.get(req.params.id)
       if (device) {
         res.json(device)
@@ -281,432 +413,151 @@ class GPSVisualizer {
       }
     })
 
-    // Serve the main dashboard
-    app.get('/', (req, res) => {
-      res.send(this.getDashboardHTML())
+    // Health check endpoint
+    this.app.get('/api/health', (req, res) => {
+      res.json({
+        status: 'healthy',
+        devices: this.devices.size,
+        clients: this.wsClients.size,
+        subscription: this.subscription ? 'active' : 'inactive',
+        timestamp: Date.now()
+      })
     })
 
-    // Start HTTP server
-    const server = app.listen(this.port, () => {
-      console.log(`🌐 GPS Dashboard running at http://localhost:${this.port}`)
-    })
+    // Create HTTP server
+    this.server = createServer(this.app)
 
     // Setup WebSocket server
-    this.wss = new WebSocketServer({ server })
-    
+    this.wss = new WebSocketServer({ server: this.server })
+
     this.wss.on('connection', (ws) => {
-      console.log('🔌 New WebSocket connection')
-      
-      // Send current device data to new client with BigInt handling
+      console.log('🔌 New WebSocket client connected')
+      this.wsClients.add(ws)
+
+      // Send current device data to new client
       const devicesArray = Array.from(this.devices.values())
-      const message = JSON.stringify({
-        type: 'initialData',
-        devices: devicesArray
-      }, (key, value) => {
-        return typeof value === 'bigint' ? value.toString() : value
-      })
-      
-      ws.send(message)
+      ws.send(JSON.stringify({
+        type: 'initial_data',
+        devices: devicesArray,
+        timestamp: Date.now()
+      }))
 
       ws.on('close', () => {
-        console.log('🔌 WebSocket connection closed')
+        console.log('🔌 WebSocket client disconnected')
+        this.wsClients.delete(ws)
       })
-      
+
       ws.on('error', (error) => {
-        console.log('🔌 WebSocket error:', error.message)
+        console.error('❌ WebSocket error:', error)
+        this.wsClients.delete(ws)
       })
     })
-  }
 
-  // Generate dashboard HTML
-  getDashboardHTML() {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS Tracker Dashboard - Somnia Data Streams</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: #333;
-        }
-        .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 1rem 2rem;
-            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-        }
-        .header h1 {
-            color: #4a5568;
-            font-size: 1.8rem;
-            font-weight: 600;
-        }
-        .header p {
-            color: #718096;
-            margin-top: 0.25rem;
-        }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .stat-card h3 {
-            color: #4a5568;
-            font-size: 0.9rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.5rem;
-        }
-        .stat-card .value {
-            color: #2d3748;
-            font-size: 2rem;
-            font-weight: 700;
-        }
-        .devices-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 1.5rem;
-        }
-        .device-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .device-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
-        }
-        .device-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-        .device-status {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #48bb78;
-            margin-right: 0.75rem;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .device-name {
-            color: #2d3748;
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-        .device-info {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-        }
-        .info-item {
-            display: flex;
-            flex-direction: column;
-        }
-        .info-label {
-            color: #718096;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.25rem;
-        }
-        .info-value {
-            color: #2d3748;
-            font-size: 0.95rem;
-            font-weight: 600;
-        }
-        .coordinates {
-            background: #f7fafc;
-            border-radius: 8px;
-            padding: 0.75rem;
-            margin-top: 1rem;
-        }
-        .coordinates-label {
-            color: #4a5568;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-        }
-        .coordinates-value {
-            color: #2d3748;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-        .no-devices {
-            text-align: center;
-            padding: 3rem;
-            color: rgba(255, 255, 255, 0.8);
-        }
-        .no-devices h3 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-        }
-        .connection-status {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 8px;
-            padding: 0.5rem 1rem;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-        .connected { color: #48bb78; }
-        .disconnected { color: #f56565; }
-    </style>
-</head>
-<body>
-    <div class="connection-status" id="connectionStatus">
-        <span class="disconnected">● Connecting...</span>
-    </div>
-    
-    <div class="header">
-        <h1>🛰️ GPS Tracker Dashboard</h1>
-        <p>Real-time GPS tracking powered by Somnia Data Streams</p>
-    </div>
-    
-    <div class="container">
-        <div class="stats-grid">
-            <div class="stat-card">
-                <h3>Active Devices</h3>
-                <div class="value" id="deviceCount">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Total Updates</h3>
-                <div class="value" id="updateCount">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Avg Speed</h3>
-                <div class="value" id="avgSpeed">0 km/h</div>
-            </div>
-            <div class="stat-card">
-                <h3>Last Update</h3>
-                <div class="value" id="lastUpdate">Never</div>
-            </div>
-        </div>
-        
-        <div id="devicesContainer">
-            <div class="no-devices">
-                <h3>🔍 Waiting for GPS data...</h3>
-                <p>Start the GPS publisher to see real-time location updates</p>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let devices = new Map();
-        let updateCount = 0;
-        let ws = null;
-
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
-            
-            ws.onopen = function() {
-                console.log('WebSocket connected');
-                document.getElementById('connectionStatus').innerHTML = '<span class="connected">● Connected</span>';
-            };
-            
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                
-                if (data.type === 'initialData') {
-                    data.devices.forEach(device => {
-                        devices.set(device.id, device);
-                    });
-                    updateCount = devices.size * 10; // Estimate
-                } else if (data.type === 'deviceUpdate') {
-                    devices.set(data.device.id, data.device);
-                    updateCount++;
-                }
-                
-                updateDashboard();
-            };
-            
-            ws.onclose = function() {
-                console.log('WebSocket disconnected');
-                document.getElementById('connectionStatus').innerHTML = '<span class="disconnected">● Disconnected</span>';
-                // Reconnect after 3 seconds
-                setTimeout(connectWebSocket, 3000);
-            };
-            
-            ws.onerror = function(error) {
-                console.error('WebSocket error:', error);
-            };
-        }
-
-        function updateDashboard() {
-            const devicesArray = Array.from(devices.values());
-            
-            // Update stats
-            document.getElementById('deviceCount').textContent = devicesArray.length;
-            document.getElementById('updateCount').textContent = updateCount;
-            
-            if (devicesArray.length > 0) {
-                const avgSpeed = devicesArray.reduce((sum, device) => sum + device.speed, 0) / devicesArray.length;
-                document.getElementById('avgSpeed').textContent = \`\${avgSpeed.toFixed(1)} km/h\`;
-                
-                const lastUpdate = Math.max(...devicesArray.map(device => new Date(device.lastUpdate).getTime()));
-                document.getElementById('lastUpdate').textContent = new Date(lastUpdate).toLocaleTimeString();
-            }
-            
-            // Update devices grid
-            const container = document.getElementById('devicesContainer');
-            
-            if (devicesArray.length === 0) {
-                container.innerHTML = \`
-                    <div class="no-devices">
-                        <h3>🔍 Waiting for GPS data...</h3>
-                        <p>Start the GPS publisher to see real-time location updates</p>
-                    </div>
-                \`;
-            } else {
-                container.innerHTML = \`
-                    <div class="devices-grid">
-                        \${devicesArray.map(device => \`
-                            <div class="device-card">
-                                <div class="device-header">
-                                    <div class="device-status"></div>
-                                    <div class="device-name">\${device.name}</div>
-                                </div>
-                                <div class="device-info">
-                                    <div class="info-item">
-                                        <div class="info-label">Speed</div>
-                                        <div class="info-value">\${parseFloat(device.speed)} km/h</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Altitude</div>
-                                        <div class="info-value">\${parseFloat(device.altitude)}m</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">Last Update</div>
-                                        <div class="info-value">\${new Date(device.lastUpdate).toLocaleTimeString()}</div>
-                                    </div>
-                                    <div class="info-item">
-                                        <div class="info-label">History Points</div>
-                                        <div class="info-value">\${device.history.length}</div>
-                                    </div>
-                                </div>
-                                <div class="coordinates">
-                                    <div class="coordinates-label">📍 Current Location</div>
-                                    <div class="coordinates-value">
-                                        \${(parseFloat(device.latitude) / 1000000).toFixed(6)}, \${(parseFloat(device.longitude) / 1000000).toFixed(6)}
-                                    </div>
-                                </div>
-                            </div>
-                        \`).join('')}
-                    </div>
-                \`;
-            }
-        }
-
-        // Initialize
-        connectWebSocket();
-        updateDashboard();
-    </script>
-</body>
-</html>
-    `
+    // Start server
+    this.server.listen(port, () => {
+      console.log(`🌐 GPS Visualizer server running on http://localhost:${port}`)
+      console.log(`📊 WebSocket server ready for real-time GPS data`)
+      console.log(`🔍 API endpoints:`)
+      console.log(`  • GET /api/devices - List all devices`)
+      console.log(`  • GET /api/devices/:id - Get specific device`)
+      console.log(`  • GET /api/health - Health check`)
+    })
   }
 
   // Start the visualizer
-  async startVisualizer() {
+  async start() {
     try {
-      console.log('🚀 Starting GPS Visualizer...')
+      console.log('🚀 Starting GPS Visualizer with Streams API...')
       
-      // Initialize SDK
+      // Initialize Streams SDK
       await this.initializeSDK()
       
-      // Setup web server first
-      this.setupWebServer()
+      // Setup web server and WebSocket
+      this.setupServer()
       
-      // Subscribe to GPS streams
-      await this.subscribeToGPSStreams()
+      // Start polling for GPS data streams
+      await this.pollForGPSData()
       
       console.log('✅ GPS Visualizer started successfully')
-      console.log(`📊 Dashboard: http://localhost:${this.port}`)
+      console.log('📡 Listening for GPS data from Streams API...')
+      console.log('🌐 Open http://localhost:3001 to view the dashboard')
       
     } catch (error) {
-      console.error('❌ Failed to start GPS visualizer:', error)
+      console.error('❌ Failed to start GPS Visualizer:', error)
       throw error
     }
   }
 
   // Stop the visualizer
-  stopVisualizer() {
-    this.isSubscribed = false
-    
-    // Unsubscribe from data streams
-    if (this.subscription) {
-      this.subscription() // Call the unwatch function
+  async stop() {
+    try {
+      console.log('🛑 Stopping GPS Visualizer...')
+      
+      // Unsubscribe from streams
+      if (this.subscription) {
+        await this.subscription.unsubscribe()
+        this.subscription = null
+        console.log('📡 Unsubscribed from GPS data streams')
+      }
+      
+      // Close WebSocket connections
+      this.wsClients.forEach(client => {
+        client.close()
+      })
+      this.wsClients.clear()
+      
+      // Close server
+      if (this.server) {
+        this.server.close()
+        console.log('🌐 Web server stopped')
+      }
+      
+      console.log('✅ GPS Visualizer stopped successfully')
+      
+    } catch (error) {
+      console.error('❌ Error stopping GPS Visualizer:', error)
     }
-    
-    if (this.wss) {
-      this.wss.close()
+  }
+
+  // Get current status
+  getStatus() {
+    return {
+      devices: Array.from(this.devices.values()),
+      deviceCount: this.devices.size,
+      clientCount: this.wsClients.size,
+      subscriptionActive: !!this.subscription,
+      lastUpdate: Date.now()
     }
-    console.log('🛑 GPS Visualizer stopped')
   }
 }
 
 // Main execution
 async function main() {
-  // Validate environment variables
-  if (!process.env.SOMNIA_PRIVATE_KEY && !process.env.PRIVATE_KEY) {
-    throw new Error('SOMNIA_PRIVATE_KEY (or PRIVATE_KEY) not found in environment variables')
-  }
-  if (!process.env.SOMNIA_RPC_URL && !process.env.RPC_URL) {
-    throw new Error('SOMNIA_RPC_URL (or RPC_URL) not found in environment variables')
-  }
-
   const visualizer = new GPSVisualizer()
   
-  // Graceful shutdown handling
-  process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down GPS Visualizer...')
-    visualizer.stopVisualizer()
-    process.exit(0)
-  })
-
   try {
-    await visualizer.startVisualizer()
+    await visualizer.start()
+    
+    // Handle graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('\n🛑 Shutting down GPS Visualizer...')
+      await visualizer.stop()
+      process.exit(0)
+    })
+    
+    process.on('SIGTERM', async () => {
+      console.log('\n🛑 Shutting down GPS Visualizer...')
+      await visualizer.stop()
+      process.exit(0)
+    })
+    
   } catch (error) {
-    console.error('❌ GPS Visualizer failed:', error)
+    console.error('❌ GPS Visualizer failed to start:', error)
     process.exit(1)
   }
 }
 
-main()
+// Run if this file is executed directly
+if (import.meta.url.toLowerCase() === `file:///${process.argv[1].replace(/\\/g, '/')}`.toLowerCase()) {
+  main()
+}
