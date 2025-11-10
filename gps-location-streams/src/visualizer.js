@@ -28,6 +28,9 @@ const somniaChain = defineChain({
   },
 })
 
+const streamTopic = 'gps-tracking-demo';
+const publisherAddress = '0xc8F59daEa91f30F4F6D85E5c510d78bd1ac4b19e';
+
 export class GPSVisualizer {
   constructor() {
     this.sdk = null
@@ -38,6 +41,7 @@ export class GPSVisualizer {
     this.server = null
     this.wss = null
     this.pollingInterval = null
+    this.hasReceivedData = false;
   }
 
   // Initialize SDK with proper Streams configuration
@@ -57,13 +61,13 @@ export class GPSVisualizer {
       // Create clients for Streams SDK
       const publicClient = createPublicClient({
         chain: somniaChain,
-        transport: http()
+        transport: webSocket(process.env.SOMNIA_RPC_URL.replace('http', 'ws'))
       })
 
       const walletClient = createWalletClient({
         account: this.account,
         chain: somniaChain,
-        transport: http()
+        transport: webSocket(process.env.SOMNIA_RPC_URL.replace('http', 'ws'))
       })
 
       // Initialize Streams SDK with proper configuration
@@ -86,11 +90,18 @@ export class GPSVisualizer {
       console.log(`🔍 Raw data received:`, data);
       
       // Handle packed hex data from blockchain
+      // Accept common shapes: string hex, { data: '0x...' }, [ '0x...' ]
+      if (typeof data === 'string' && data.startsWith('0x')) {
+        return this.decodePackedGPSData(data, deviceId);
+      }
+      if (data && typeof data === 'object' && typeof data.data === 'string' && data.data.startsWith('0x')) {
+        return this.decodePackedGPSData(data.data, deviceId);
+      }
       if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'string' && data[0].startsWith('0x')) {
         return this.decodePackedGPSData(data[0], deviceId);
       }
       
-      // Handle already decoded data
+      // Handle already decoded data objects (e.g., mock or pre-decoded payloads)
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         const gpsData = {
           deviceId: data.deviceId || deviceId,
@@ -205,6 +216,7 @@ export class GPSVisualizer {
       };
 
       this.devices.set(deviceName, deviceData);
+      this.hasReceivedData = true;
       this.broadcastDeviceUpdate(deviceData);
       return deviceData;
     } catch (error) {
@@ -281,71 +293,45 @@ export class GPSVisualizer {
   }
 
   // Poll for GPS data using Streams API
-  async pollForGPSData() {
+  async subscribeToGPSData() {
     try {
-      console.log('📡 Setting up GPS data polling via Streams API...')
+      console.log('📡 Setting up GPS data subscription via Streams API...');
       
-      // Generate the bytes32 schema ID using keccak256 hash of the schema name
-      // Align with registered schema id defined in schemas.js: 'gps_location'
-      const schemaId = keccak256(toBytes('gps_location'))
-      
-      console.log(`📋 Polling for schema: gps_location`)
-      console.log(`🔍 Schema ID (bytes32): ${schemaId}`)
+      const schemaId = keccak256(toBytes('gps_location'));
+      console.log(`📋 Subscribing to schema: gps_location`);
+      console.log(`🔍 Schema ID (bytes32): ${schemaId}`);
 
-      // Get publisher address from the account (same as the one publishing data)
-      const publisherAddress = this.account.address
-      console.log(`📍 Publisher Address: ${publisherAddress}`)
+      console.log(`📍 Publisher Address: ${publisherAddress}`);
 
-      // Poll for real GPS data from blockchain
-      this.pollingInterval = setInterval(async () => {
-        try {
-          // Known device IDs that the publisher is using
-          const deviceIds = [
-            pad(toHex('truck_alpha'), { size: 32 }),
-            pad(toHex('vehicle_beta'), { size: 32 }),
-            pad(toHex('van_gamma'), { size: 32 })
-          ]
-          
-          for (const deviceId of deviceIds) {
-            try {
-              // Read GPS data from blockchain using getByKey
-              const data = await this.sdk.streams.getByKey(
-                schemaId,
-                publisherAddress,
-                deviceId
-              )
-              
-              if (data) {
-                console.log(`📥 Retrieved GPS data from blockchain for device: ${deviceId}`)
-                this.processGPSData(data, deviceId.replace('0x', '').replace(/00+$/, ''))
-              } else {
-                console.log(`📭 No data found for device: ${deviceId}`)
-              }
-            } catch (deviceError) {
-              console.warn(`⚠️ Failed to get data for device ${deviceId}:`, deviceError.message)
-            }
+      this.subscription = await this.sdk.streams.subscribe(
+        schemaId,
+        publisherAddress,
+        (data, key) => {
+          console.log(`[onData] Callback triggered for key: ${key}`);
+          console.log(`[onData] Raw data received:`, data);
+          try {
+            const deviceId = key.replace(/^0x|0+$/g, '');
+            console.log(`[onData] Processing data for deviceId: ${deviceId}`);
+            this.processGPSData(data, deviceId);
+            console.log(`[onData] Successfully processed data for deviceId: ${deviceId}`);
+          } catch (e) {
+            console.error(`[onData] Error processing data:`, e);
           }
-        } catch (pollError) {
-          console.error('❌ Polling error:', pollError.message)
-          console.log('💡 Falling back to mock data generation...')
-          // Fallback to mock data if blockchain read fails
-          this.generateMockDataPoint()
+        },
+        {
+          topic: streamTopic
         }
-      }, 3000)
+      );
 
-      console.log('✅ Successfully started GPS data polling from blockchain')
-      console.log('📊 Polling for GPS data every 3 seconds...')
-
+      console.log('✅ Successfully subscribed to real-time GPS data stream');
+      
     } catch (error) {
-      console.error('❌ Failed to start GPS data polling:', error)
-      
+      console.error('❌ Failed to subscribe to GPS data stream:', error);
       if (error.message.includes('schema')) {
-        console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema')
+        console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema');
       }
-      
-      // Fallback to mock data if setup fails
-      console.log('🔄 Falling back to mock data generation...')
-      return this.startMockDataPolling()
+      console.log('🔄 Falling back to mock data generation...');
+      this.startMockDataPolling();
     }
   }
 
@@ -434,13 +420,15 @@ export class GPSVisualizer {
       console.log('🔌 New WebSocket client connected')
       this.wsClients.add(ws)
 
-      // Send current device data to new client
-      const devicesArray = Array.from(this.devices.values())
-      ws.send(JSON.stringify({
-        type: 'initial_data',
-        devices: devicesArray,
-        timestamp: Date.now()
-      }))
+      // Send current device data to new client only if we have data
+      if (this.hasReceivedData) {
+        const devicesArray = Array.from(this.devices.values());
+        ws.send(JSON.stringify({
+          type: 'initial_data',
+          devices: devicesArray,
+          timestamp: Date.now()
+        }));
+      }
 
       ws.on('close', () => {
         console.log('🔌 WebSocket client disconnected')
@@ -476,7 +464,7 @@ export class GPSVisualizer {
       this.setupServer()
       
       // Start polling for GPS data streams
-      await this.pollForGPSData()
+      await this.subscribeToGPSData()
       
       console.log('✅ GPS Visualizer started successfully')
       console.log('📡 Listening for GPS data from Streams API...')

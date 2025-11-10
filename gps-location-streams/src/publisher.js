@@ -25,6 +25,8 @@ const somniaChain = defineChain({
   },
 })
 
+const streamTopic = 'gps-tracking-demo';
+
 export class GPSPublisher {
   constructor() {
     this.sdk = null
@@ -32,6 +34,7 @@ export class GPSPublisher {
     this.devices = []
     this.publishInterval = null
     this.isPublishing = false
+    this.deviceIndex = 0
     
     // Initialize SchemaEncoder with GPS schema
     const gpsSchema = 'bytes32 deviceId, uint64 timestamp, int256 latitude, int256 longitude, int256 altitude, uint256 speed'
@@ -125,12 +128,12 @@ export class GPSPublisher {
     const timeDeltaSec = (now - device.lastUpdate) / 1000
     if (timeDeltaSec <= 0) return device
 
-    // Vary speed around a reasonable base, clamp 5–120 km/h
-    const speedVariation = (Math.random() - 0.5) * 10 // ±5 km/h
+    // Vary speed around a reasonable base, clamp 5–120 km/h (slightly larger variance)
+    const speedVariation = (Math.random() - 0.5) * 20 // ±10 km/h
     const targetSpeed = Math.max(5, Math.min(120, device.speed + speedVariation))
 
-    // Slightly drift heading
-    const headingDrift = (Math.random() - 0.5) * 4 // ±2 degrees
+    // Drift heading more noticeably
+    const headingDrift = (Math.random() - 0.5) * 12 // ±6 degrees
     device.heading = (device.heading + headingDrift + 360) % 360
 
     // Convert speed to distance over the interval
@@ -176,65 +179,88 @@ export class GPSPublisher {
   }
 
   // Publish GPS data using Streams API
+  async publishAllDevices() {
+    console.log(`[${this.name}] Publishing updates for all devices...`)
+    for (const device of this.devices) {
+      try {
+        // Now we wait for each publish to complete before starting the next
+        await this.publishGPSData(device)
+      } catch (error) {
+        console.error(`[${this.name}] Error publishing data for ${device.name}:`, error)
+      }
+    }
+  }
+
   async publishGPSData(device) {
     try {
-      // Simulate movement
+      // Simulate movement before creating data
       this.simulateMovement(device)
-      
-      // Create GPS data
+
       const gpsData = this.createGPSData(device)
       
       // Generate bytes32 data ID using keccak256 hash (SDK requires bytes32)
       const dataId = keccak256(toBytes(`${device.id}_${gpsData.timestamp}`))
 
       console.log(`🔍 Publishing GPS data for ${device.name}:`)
-      console.log(`  📍 Location: ${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`)
-      console.log(`  🚗 Speed: ${device.speed} km/h, Altitude: ${device.altitude}m`)
-      console.log(`  🆔 Data ID: ${dataId}`)
+    console.log(`  📍 Location: ${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`)
+    console.log(`  🚗 Speed: ${device.speed} km/h, Altitude: ${device.altitude}m`)
+    console.log(`  🆔 Data ID: ${dataId}`)
 
-      // Generate the bytes32 schema ID using keccak256 hash (SDK requires bytes32)
-      // Align with registered schema id defined in schemas.js: 'gps_location'
-      const schemaId = keccak256(toBytes('gps_location'))
-      
-      console.log(`  🔍 Schema ID (bytes32): ${schemaId}`)
-      console.log(`  📊 GPS Data structure:`, JSON.stringify(gpsData, (key, value) => 
-        typeof value === 'bigint' ? value.toString() : value, 2))
+    // Generate the bytes32 schema ID using keccak256 hash (SDK requires bytes32)
+    // Align with registered schema id defined in schemas.js: 'gps_location'
+    const schemaId = keccak256(toBytes('gps_location'))
+    
+    console.log(`  🔍 Schema ID (bytes32): ${schemaId}`)
+    console.log(`  📊 GPS Data structure:`, JSON.stringify(gpsData, (key, value) => 
+      typeof value === 'bigint' ? value.toString() : value, 2))
 
-      // Encode the GPS data using SchemaEncoder
-      const encodedData = this.schemaEncoder.encodeData([
-        { name: "deviceId", value: gpsData.deviceId, type: "bytes32" },
-        { name: "timestamp", value: gpsData.timestamp.toString(), type: "uint64" },
-        { name: "latitude", value: gpsData.latitude.toString(), type: "int256" },
-        { name: "longitude", value: gpsData.longitude.toString(), type: "int256" },
-        { name: "altitude", value: gpsData.altitude.toString(), type: "int256" },
-        { name: "speed", value: gpsData.speed.toString(), type: "uint256" }
+    // Encode the GPS data using SchemaEncoder
+    const encodedData = this.schemaEncoder.encodeData([
+      { name: "deviceId", value: gpsData.deviceId, type: "bytes32" },
+      { name: "timestamp", value: gpsData.timestamp.toString(), type: "uint64" },
+      { name: "latitude", value: gpsData.latitude.toString(), type: "int256" },
+      { name: "longitude", value: gpsData.longitude.toString(), type: "int256" },
+      { name: "altitude", value: gpsData.altitude.toString(), type: "int256" },
+      { name: "speed", value: gpsData.speed.toString(), type: "uint256" }
+    ])
+
+    console.log(`  🔐 Encoded data (hex): ${encodedData}`)
+
+    // Publish using set method with properly encoded data
+    let result
+    try {
+      result = await this.sdk.streams.set([
+        { id: dataId, schemaId: schemaId, data: encodedData, topic: streamTopic }
       ])
-
-      console.log(`  🔐 Encoded data (hex): ${encodedData}`)
-
-      // Publish using set method with properly encoded data
-      const result = await this.sdk.streams.set([{
-        id: dataId,
-        schemaId: schemaId,  // Use bytes32 format
-        data: encodedData    // Use encoded hex data instead of raw object
-      }])
-
-      console.log(`✅ GPS data published successfully for ${device.name}`)
-      console.log(`📋 Transaction result:`, result)
-      
-      return result
-      
-    } catch (error) {
-      console.error(`❌ Failed to publish GPS data for ${device.name}:`, error.message)
-      
-      // Log additional debug information
-      if (error.message.includes('schema')) {
-        console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema')
+    } catch (err) {
+      // Handle nonce-related transient errors by retrying once after a short delay
+      if ((err?.message || '').toLowerCase().includes('nonce')) {
+        console.warn('⚠️ Nonce issue detected. Retrying publish after short delay...')
+        await new Promise(r => setTimeout(r, 1500))
+        result = await this.sdk.streams.set([
+          { id: dataId, schemaId: schemaId, data: encodedData, topic: streamTopic }
+        ])
+      } else {
+        throw err
       }
-      
-      throw new Error(`Failed to publish data for ${device.name}: ${error.message}`)
     }
+
+    console.log(`✅ GPS data published successfully for ${device.name}`)
+    console.log(`📋 Transaction result:`, result)
+    
+    return result
+    
+  } catch (error) {
+    console.error(`❌ Failed to publish GPS data for ${device.name}:`, error.message)
+    
+    // Log additional debug information
+    if (error.message.includes('schema')) {
+      console.log('💡 Hint: Make sure the GPS schema is registered first with: npm run register-schema')
+    }
+    
+    throw new Error(`Failed to publish data for ${device.name}: ${error.message}`)
   }
+}
 
   // Start publishing GPS data
   async startPublishing() {
@@ -244,41 +270,39 @@ export class GPSPublisher {
     }
 
     const publishIntervalMs = parseInt(process.env.PUBLISH_INTERVAL_MS || '5000')
+    this.publishIntervalMs = publishIntervalMs;
     console.log(`📡 Publishing GPS data via Streams API every ${publishIntervalMs}ms`)
     console.log(`📋 Publishing GPS data using Streams API with schema: gps_location`)
 
     this.isPublishing = true
-    
-    // Publish data for all devices
-    const publishAllDevices = async () => {
-      if (!this.isPublishing) return
-      
-      for (const device of this.devices) {
-        try {
-          await this.publishGPSData(device)
-          // Small delay between device publications
-          await new Promise(resolve => setTimeout(resolve, 100))
-        } catch (error) {
-          console.error(`❌ Failed to publish data for ${device.name}:`, error.message)
-        }
-      }
-    }
 
-    // Initial publication
-    await publishAllDevices()
-    
-    // Set up interval for continuous publishing
-    this.publishInterval = setInterval(publishAllDevices, publishIntervalMs)
-    
+    // Start the publishing loop
+    this.scheduleNextPublication()
+
     console.log('✅ GPS Publisher started successfully')
     console.log('📊 Monitor the visualizer at http://localhost:3001 to see live GPS data')
   }
 
+  // Schedule the next publication using a timeout
+  scheduleNextPublication() {
+    if (!this.isPublishing) return
+
+    // Clear any existing timeout to avoid duplicates
+    if (this.publishTimeout) {
+      clearTimeout(this.publishTimeout)
+    }
+
+    this.publishTimeout = setTimeout(async () => {
+      await this.publishAllDevices()
+      this.scheduleNextPublication() // Schedule the next one
+    }, this.publishIntervalMs)
+  }
+
   // Stop publishing GPS data
   stopPublishing() {
-    if (this.publishInterval) {
-      clearInterval(this.publishInterval)
-      this.publishInterval = null
+    if (this.publishTimeout) {
+      clearTimeout(this.publishTimeout)
+      this.publishTimeout = null
     }
     this.isPublishing = false
     console.log('🛑 GPS Publisher stopped')
